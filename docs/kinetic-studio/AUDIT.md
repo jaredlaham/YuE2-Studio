@@ -315,4 +315,9 @@ Known limits, stated rather than hidden:
 - The model sees the mix at 44.1 kHz. From a 48 kHz or 96 kHz mix, anything above 22.05 kHz is not in any stem; the sum-to-mix figure includes it. With the stand-in on white-noise hi-hats this is about −30 dB; on music it is usually far smaller.
 - Only the processor build runs on the Mac. A Core ML execution provider is not wired in yet, so separation speed on M1/M2 is whatever the CI job measures, not a GPU figure.
 - Only the 6-stem model exists; "4 stems" today means keeping drums, bass, other and vocals. A dedicated 4-stem model is not added.
-- Loop regions and per-stem pan in the stem player are not done yet.
+
+### Stem mixer
+
+The stems card now plays every stem together on one transport (the mix's waveform), with per-stem mute, solo, volume (0 to +6 dB) and pan, and a loop region set by seconds or from the playhead (`StemMixer.tsx`, logic in `services/stemMix.ts` with 4 unit tests). Each stem is an audio element through a gain and a stereo panner; the others follow the first and are re-seeked past 30 ms of drift. Looping is by seeking, so the seam is about a screen frame, not sample-accurate: it is for auditioning, and nothing set here changes the stem files.
+
+Browser check (Chromium, real service, the stand-in stems): after 2.5 s all six elements read 2.525 s; with a 5.0–6.0 s loop the transport stayed between 5.00 and 5.95 s and wrapped three times in 3 s. Mute/solo/pan state shows correctly; their effect on the audio graph is covered by the unit tests of the gain rules, not measured from the output.

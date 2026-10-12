@@ -6,7 +6,7 @@ import { DevicePicker } from './DevicePicker';
 import { transcribeWithNativeOpenRouter } from '../services/nativeOpenRouter';
 import { apiUrl } from '../services/apiBase';
 import { openExternal } from '../services/externalLinks';
-import { StemPlayer } from './StemPlayer';
+import { StemMixer } from './StemMixer';
 import { mapNativeLibrarySong } from '../services/nativeLibrary';
 import type { NativeLibrarySong } from '../types';
 import type { TranslationKey } from '../i18n/translations';
@@ -397,26 +397,17 @@ export function StudioToolsPanel({ initialSongId }: { initialSongId?: string | n
             </div>
           )}
 
-          {stems.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {stems.map(stem => {
-                const url = apiUrl(`/v1/library/songs/${encodeURIComponent(songId)}/stems/${stem}`);
-                return (
-                  <div key={stem} className="flex items-center gap-2">
-                    <div className="min-w-0 flex-1">
-                      <StemPlayer src={url} label={t(`stem_${stem}` as never) || stem} />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => void saveFile(`${songs.find(song => song.id === songId)?.title ?? 'track'} - ${stem}.wav`, { url })}
-                      className="shrink-0 text-zinc-400 hover:text-pink-500"
-                      title={t('download')}
-                    >
-                      <Download size={15} />
-                    </button>
-                  </div>
-                );
-              })}
+          {stems.length > 0 && songId && (
+            <div className="mt-3">
+              <StemMixer
+                // the audio graph is wired once per set of stems: a new set is a new mixer
+                key={`${songId}:${stems.join(',')}`}
+                stems={stems}
+                urlFor={stem => apiUrl(`/v1/library/songs/${encodeURIComponent(songId)}/stems/${stem}`)}
+                mixUrl={apiUrl(`/v1/library/media/${encodeURIComponent(songId)}`)}
+                label={stem => t(`stem_${stem}` as never) || stem}
+                onDownload={stem => void saveFile(`${songs.find(song => song.id === songId)?.title ?? 'track'} - ${stem}.wav`, { url: apiUrl(`/v1/library/songs/${encodeURIComponent(songId)}/stems/${stem}`) })}
+              />
             </div>
           )}
 

@@ -7,6 +7,7 @@ import { useI18n } from '../context/I18nContext';
 import type { Language } from '../i18n/translations';
 import { ProviderSettings } from './ProviderSettings';
 import { EngineSettings } from './EngineSettings';
+import { RemoteEngineSettings } from './RemoteEngineSettings';
 import { SetupGate } from './SetupGate';
 import { CoverTemplateSettings } from './CoverTemplateSettings';
 import { AgentPanel } from './AgentPanel';
@@ -154,7 +155,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, initialSec
                 decision - only now nothing is waiting on it. */}
             {section === 'covers' && <CoverTemplateSettings />}
             {section === 'models' && <div className="-m-6"><SetupGate mode="settings" focus={focus} /></div>}
-            {section === 'engine' && <EngineSettings />}
+            {section === 'engine' && <><EngineSettings /><RemoteEngineSettings /></>}
             {section === 'cloud' && <ProviderSettings />}
             {section === 'agent' && <AgentPanel />}
             {section === 'privacy' && <HubSettings />}

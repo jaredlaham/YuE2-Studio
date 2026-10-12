@@ -29,6 +29,7 @@ import { midiImportOptions } from '../i18n/midiImportOptions';
 import { SongTextParts } from './SongTextParts';
 import { writerInstruction } from '../services/songWriting';
 import { songWritingStrings } from '../i18n/songWriting';
+import { KineticPromptPanel, type KineticForm } from './KineticPromptPanel';
 
 /**
  * The YuE2 request form.
@@ -517,6 +518,26 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     if (Array.isArray(request.adapters)) setAdapters(usesFromSettings(request));
     setError(null);
   }, []);
+
+  /** What the form held before the Kinetic builder last filled it, so that fill can be undone. */
+  const [kineticUndo, setKineticUndo] = useState<{ style: string; lyrics: string; abc: string; cot: YueCot | ''; duration: string } | null>(null);
+  const applyKinetic = (form: KineticForm) => {
+    setKineticUndo({ style, lyrics, abc, cot, duration });
+    setStyle(form.style);
+    setLyrics(form.lyrics);
+    setAbc(form.abc);
+    setCot(form.cot);
+    if (form.durationSeconds !== null) chooseDuration(String(Math.min(Math.max(form.durationSeconds, 1), MAX_DURATION_SECONDS)));
+    setPlans([]); setSelectedPlan(0); setSemanticTokens(''); setContinueScore(false);
+    if (form.abc) setShowNotation(true);
+    setError(null);
+  };
+  const undoKinetic = () => {
+    if (!kineticUndo) return;
+    setStyle(kineticUndo.style); setLyrics(kineticUndo.lyrics); setAbc(kineticUndo.abc); setCot(kineticUndo.cot); setDuration(kineticUndo.duration);
+    setPlans([]); setSelectedPlan(0);
+    setKineticUndo(null);
+  };
 
   useEffect(() => {
     if (!initialData?.song) return;
@@ -1316,6 +1337,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               )}
             </div>
           )}
+
+          {mode === 'studio' && <KineticPromptPanel engineReady={ready} onApply={applyKinetic} onUndo={kineticUndo ? undoKinetic : undefined} />}
 
           <Card
             title={tt('styleCardTitle')}

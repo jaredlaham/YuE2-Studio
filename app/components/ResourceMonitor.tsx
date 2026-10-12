@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useSystemResources } from '../services/studioQueries';
+import { useSetupStatus, useSystemResources } from '../services/studioQueries';
 import { createPortal } from 'react-dom';
 import { Minimize2, Move, PictureInPicture2 } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
@@ -81,6 +81,8 @@ function storedPosition(): { x: number; y: number } {
 
 export const ResourceMonitor: React.FC<{ isOpen?: boolean }> = ({ isOpen = true }) => {
   const { t } = useI18n();
+  // a remote engine (Kinetic Studio) has no process on this computer to measure
+  const remoteEngine = useSetupStatus<{ engine_remote?: string | null }>().data?.engine_remote ?? null;
   const resources = useSystemResources<{ poll_interval_ms?: number; resources: ResourceSnapshot }>();
   const snapshot = resources.data?.resources ?? null;
   const unavailable = resources.isError;
@@ -132,7 +134,7 @@ export const ResourceMonitor: React.FC<{ isOpen?: boolean }> = ({ isOpen = true 
       <Bar label="RAM" percent={ramPercent} value={`${gb(snapshot.ram_used_mb)} / ${gb(snapshot.ram_total_mb)}`} />
       <Bar label="CPU" percent={snapshot.cpu_percent} value={`${Math.round(snapshot.cpu_percent)}%`} />
       <div className="flex items-center justify-between text-[10px] text-zinc-500 dark:text-zinc-400">
-        <span>{snapshot.engine_process ? t('engineProcess') : t('engineOffline')}</span>
+        <span>{snapshot.engine_process ? t('engineProcess') : remoteEngine ? 'Engine on another computer' : t('engineOffline')}</span>
         <span className="tabular-nums">{snapshot.engine_process ? gb(snapshot.engine_process.memory_mb) : '—'}</span>
       </div>
     </div>

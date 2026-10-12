@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RemoteEngineSettings } from './RemoteEngineSettings';
 import { openRouterSettingsChanged } from '../services/studioQueries';
 import { Check, ChevronDown, Download, FolderDown, FolderOpen, Loader2, Square, Trash2, X } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
@@ -856,6 +857,7 @@ export const SetupGate: React.FC<{ onReady?: () => void; mode?: 'first-run' | 's
             : status?.hardware?.reason || t('recommendedFallback')}
           . {t('setupResumable')}
         </div>}
+        {mode === 'first-run' && <RemoteEngineSettings compact />}
 
 
 

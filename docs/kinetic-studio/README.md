@@ -45,6 +45,21 @@ scripts/build-kinetic-macos.sh
 - Built with `--features kinetic` and `src-tauri/tauri.kinetic-macos.conf.json`;
   the upstream Windows build is unchanged.
 
+## Using a GPU on another computer
+
+A 16 GB Mac can run the quantised YuE2 sets with Metal, slowly. To use an NVIDIA machine instead, run `yue-server`
+there and point Kinetic Studio at it; this Mac then starts no engine of its own and needs no model files.
+
+1. On the GPU computer, build or install `yue2.cpp`'s `yue-server` with its model files, and start it on loopback only:
+   `yue-server --model … --vae … --companion … --host 127.0.0.1 --port 18087`.
+2. On the Mac, open a tunnel and leave it running: `ssh -N -L 18187:127.0.0.1:18087 you@gpu-computer`.
+3. In Kinetic Studio: first-run page → "Use a music engine on another computer instead", or Settings → Engine.
+   Enter `http://127.0.0.1:18187`, press **Test connection**, then **Use this engine**, and quit and reopen the app.
+
+`yue-server` has no password and no encryption, which is why the tunnel matters; an address that leaves your
+computer is accepted but warned about. LoRA adapters and the model set are whatever that engine was started with.
+Running a cloud GPU costs money by the hour: that is your call, the app never starts one.
+
 ## Smoke test
 
 `scripts/kinetic-smoke.sh <studio executable> [expected path fragment]` launches

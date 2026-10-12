@@ -605,7 +605,7 @@ impl Drop for Listening {
 /// Only the studio's own page and local agents may drive it: a web page in
 /// the user's browser, or one rebinding a domain to this computer, sends its
 /// own origin and is refused.
-fn local_origin(headers: &HeaderMap) -> bool {
+pub(crate) fn local_origin(headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN) else { return true };
     let Ok(origin) = origin.to_str() else { return false };
     let Some((scheme, rest)) = origin.split_once("://") else { return false };
@@ -2527,6 +2527,27 @@ pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
             let Some(tool) = tools().iter().find(|tool| tool.name == name) else {
                 return rpc_error(id, -32602, format!("Unknown tool: {name}; tools/list names them all."));
             };
+            // a file the agent names must be in a folder agents may use
+            if let Err(problem) = crate::mcp_guard::check_paths(name, &args, &crate::mcp_guard::folders_here()) {
+                return answer(problem, true);
+            }
+            // deleting, overwriting and the internet wait for the user's yes in the window
+            let marks = annotations(name);
+            if crate::mcp_guard::needs_consent(&marks) {
+                let asked = json!({
+                    "tool": name,
+                    "title": tool_title(name),
+                    "description": tool.description,
+                    "arguments": crate::mcp_guard::shown_arguments(&args),
+                    "deletes": marks["destructiveHint"],
+                    "internet": marks["openWorldHint"],
+                });
+                match ask_window("agent_consent", asked, 120).await {
+                    Ok(reply) if reply.get("allowed") == Some(&json!(true)) => {}
+                    Ok(_) => return answer(format!("The user did not allow {name}. Do not call it again unless they ask you to."), true),
+                    Err(problem) => return answer(format!("{name} needs the user's permission in the studio's window first, and it was not given: {problem}"), true),
+                }
+            }
             // a tool may read a file or walk a folder before its call: off the runtime
             let prepare = tool.call;
             let prepared = {
@@ -2958,4 +2979,52 @@ mod tests {
         let unknown = reply(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "nope" } })).await;
         assert_eq!(unknown["error"]["code"], -32602);
     }
+
+    #[test]
+    fn every_argument_naming_a_place_on_this_computer_is_guarded() {
+        use crate::mcp_guard::{LOCAL_PATHS, NOT_LOCAL};
+        for (name, _) in LOCAL_PATHS {
+            assert!(tools().iter().any(|tool| tool.name == *name), "{name} is a tool of the studio");
+        }
+        let mut unguarded = Vec::new();
+        for tool in tools() {
+            let schema = (tool.schema)();
+            let Some(properties) = schema.get("properties").and_then(Value::as_object) else { continue };
+            for field in properties.keys() {
+                if !(field.contains("path") || field.contains("folder") || field.ends_with("_dir")) {
+                    continue;
+                }
+                let guarded = LOCAL_PATHS.iter().any(|(name, pointers)| *name == tool.name && pointers.iter().any(|pointer| pointer.trim_end_matches("[]") == field));
+                let not_local = NOT_LOCAL.iter().any(|(name, argument)| *name == tool.name && argument == field);
+                if !guarded && !not_local {
+                    unguarded.push(format!("{}.{field}", tool.name));
+                }
+            }
+        }
+        assert!(unguarded.is_empty(), "these take a path: add each to mcp_guard::LOCAL_PATHS, or to NOT_LOCAL with why: {unguarded:?}");
+    }
+
+    #[tokio::test]
+    async fn an_agent_cannot_read_outside_the_allowed_folders_or_act_unasked() {
+        let reply = |body: Value| async move {
+            let response = handle(HeaderMap::new(), axum::body::Bytes::from(body.to_string())).await;
+            let bytes = axum::body::to_bytes(response.into_body(), 1 << 22).await.unwrap();
+            serde_json::from_slice::<Value>(&bytes).unwrap()
+        };
+        // a file at the top of the disk, `/…` here and `D:\…` on Windows
+        let disk = std::env::current_dir().unwrap().ancestors().last().unwrap().join("kinetic-not-allowed").join("hosts");
+        let outside = reply(json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "library_import_audio", "arguments": { "path": disk } } })).await;
+        assert_eq!(outside["result"]["isError"], true);
+        assert!(outside["result"]["content"][0]["text"].as_str().unwrap().contains("outside the folders agents may use"));
+        // which tools wait for the user's yes in the window
+        for name in ["library_song_delete", "models_download", "openrouter_set_key", "stems_split", "lora_install_hf"] {
+            assert!(tools().iter().any(|tool| tool.name == name), "{name} is a tool");
+            assert!(crate::mcp_guard::needs_consent(&annotations(name)), "{name} waits for the user");
+        }
+        for name in ["library_songs_list", "song_create", "library_import_audio", "studio_status"] {
+            assert!(tools().iter().any(|tool| tool.name == name), "{name} is a tool");
+            assert!(!crate::mcp_guard::needs_consent(&annotations(name)), "{name} does not");
+        }
+    }
 }
+

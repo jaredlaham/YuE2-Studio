@@ -17,6 +17,10 @@ interface ProcessingModalProps {
   song: Song;
   onClose: () => void;
   onKept: () => void;
+  /** Opens with mastering to a reference already switched on. */
+  startWith?: 'master';
+  /** Hears which track the kept result became. */
+  onKeptSong?: (song: { id: string; title: string }) => void;
 }
 
 interface Run {
@@ -82,7 +86,7 @@ const Slider: React.FC<{ label: string; value: number; min: number; max: number;
   </div>
 );
 
-export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose, onKept }) => {
+export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose, onKept, startWith, onKeptSong }) => {
   const { t } = useI18n();
   const tt = t as unknown as (key: string) => string;
 
@@ -101,7 +105,7 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
   const [vstChain, setVstChain] = useState<VstSlot[]>([]);
   const [vstPick, setVstPick] = useState('');
   const [scanning, setScanning] = useState(false);
-  const [masterOn, setMasterOn] = useState(false);
+  const [masterOn, setMasterOn] = useState(startWith === 'master');
   const [normalizeOn, setNormalizeOn] = useState(false);
   const [peakClip, setPeakClip] = useState(10);
   const [referenceMode, setReferenceMode] = useState<'library' | 'file'>('library');
@@ -291,6 +295,7 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
       kept.current = true;
       window.dispatchEvent(new CustomEvent('yue:toast', { detail: { message: t('processKept'), type: 'success' } }));
       onKept();
+      if (body?.id) onKeptSong?.({ id: body.id, title: body.title ?? '' });
       onClose();
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));

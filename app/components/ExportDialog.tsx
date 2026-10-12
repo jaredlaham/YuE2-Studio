@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Download, Loader2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, Loader2, Wand2, X } from 'lucide-react';
 import { saveFile } from '../services/saveFile';
+import { mapNativeLibrarySong } from '../services/nativeLibrary';
 import { SongMidiFiles } from './SongMidiFiles';
 import { AbletonProject } from './AbletonProject';
 
@@ -33,6 +34,9 @@ interface Report {
   original_unchanged: boolean;
 }
 interface Job { id: string; stage: string; fraction: number; done: boolean; error: string | null; report: Report | null }
+
+/** Sends a song to be mastered to a reference; the kept result comes back to Export. */
+export const MASTER_EVENT = 'kinetic:master';
 
 /** Presets name a use, not a promise about how a service will play it back. */
 const TARGETS: { id: string; label: string; lufs: number | null; ceiling: number }[] = [
@@ -131,6 +135,19 @@ export const ExportDialog: React.FC = () => {
   };
 
   const report = job?.report ?? null;
+
+  const master = async () => {
+    setError(null);
+    try {
+      const response = await fetch(`/v1/library/songs/${encodeURIComponent(song.id)}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const full = mapNativeLibrarySong(await response.json());
+      setSong(null);
+      window.dispatchEvent(new CustomEvent(MASTER_EVENT, { detail: full }));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Export">
@@ -236,6 +253,19 @@ export const ExportDialog: React.FC = () => {
               {report.notes.map(note => <li key={note}>{note}</li>)}
             </ul>
           </div>
+        )}
+
+        {!report && !busy && (
+          <section className="mt-4 rounded-xl border border-zinc-200 p-3 dark:border-white/10" data-testid="export-master">
+            <span className={LABEL}>Master to a reference track</span>
+            <p className="text-xs text-zinc-600 dark:text-zinc-300">
+              Matches this song's loudness and tonal balance to a finished track you choose (the matchering 2 method, then a limiter). You hear the result against the original before deciding.
+              Kept, it is saved as a new track in the library and Export opens again for it; this song is not changed. Export a mastered track with the level left as it is, or the loudness target above will move it away from the reference.
+            </p>
+            <button type="button" onClick={() => void master()} className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-2 text-xs font-semibold dark:border-white/10 dark:text-zinc-200">
+              <Wand2 size={13} />Choose a reference…
+            </button>
+          </section>
         )}
 
         {error && <p className="mt-3 text-xs text-rose-600 dark:text-rose-300">{error}</p>}

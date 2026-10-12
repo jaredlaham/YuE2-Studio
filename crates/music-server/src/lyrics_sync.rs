@@ -784,11 +784,11 @@ pub const ASSETS: &[Asset] = &[
         id: "onnxruntime",
         label: "ONNX Runtime 1.30.0",
         kind: AssetKind::Runtime,
-        url: "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-1.30.0.zip",
-        relative_path: "runtime/onnxruntime.zip",
-        bytes: 82_645_522,
+        url: ORT_CPU.url,
+        relative_path: ORT_CPU.relative_path,
+        bytes: ORT_CPU.bytes,
         unzip_into: Some("onnx"),
-        marker: "onnxruntime.dll",
+        marker: ORT_CPU.marker,
         pick: &[],
         vram_gb: None,
         note: "Parakeet runs on this; it is loaded at run time, not linked in.",
@@ -824,6 +824,61 @@ pub const ASSETS: &[Asset] = &[
         note: "The DirectML the runtime above is built for; the copy inside Windows is older.",
     },
 ];
+
+/// Microsoft's processor build of ONNX Runtime 1.30.0 for this platform.
+struct OrtBuild {
+    url: &'static str,
+    relative_path: &'static str,
+    bytes: u64,
+    marker: &'static str,
+}
+
+#[cfg(target_os = "macos")]
+const ORT_CPU: OrtBuild = OrtBuild {
+    url: "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-osx-arm64-1.30.0.tgz",
+    relative_path: "runtime/onnxruntime.tgz",
+    bytes: 42_373_116,
+    marker: "libonnxruntime",
+};
+
+#[cfg(target_os = "linux")]
+const ORT_CPU: OrtBuild = OrtBuild {
+    url: "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-linux-x64-1.30.0.tgz",
+    relative_path: "runtime/onnxruntime.tgz",
+    bytes: 11_306_877,
+    marker: "libonnxruntime",
+};
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+const ORT_CPU: OrtBuild = OrtBuild {
+    url: "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-1.30.0.zip",
+    relative_path: "runtime/onnxruntime.zip",
+    bytes: 82_645_522,
+    marker: "onnxruntime.dll",
+};
+
+/// The name the processor build's library has inside its directory: the
+/// versioned file itself on macOS and Linux, whose archives carry the plain
+/// names only as symbolic links.
+pub fn ort_library_in(dir: &Path) -> PathBuf {
+    if cfg!(windows) {
+        return dir.join("onnxruntime.dll");
+    }
+    let wanted = |name: &str| {
+        name.starts_with("libonnxruntime.") && (name.ends_with(".dylib") || name.contains(".so"))
+    };
+    fs::read_dir(dir)
+        .ok()
+        .and_then(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| wanted(name))
+                .max_by_key(|name| name.len())
+        })
+        .map(|name| dir.join(name))
+        .unwrap_or_else(|| dir.join(if cfg!(target_os = "macos") { "libonnxruntime.dylib" } else { "libonnxruntime.so" }))
+}
 
 /// Everything the DirectML path needs, in the order it is used.
 pub const DIRECTML_ASSETS: [&str; 2] = ["onnxruntime-directml", "directml"];
@@ -950,8 +1005,11 @@ pub fn with_card(builder: ort::session::builder::SessionBuilder, card: Option<On
 fn point_ort_at(runtime: &Path, card: Option<OnnxCard>) {
     unsafe { std::env::set_var("ORT_DYLIB_PATH", runtime) };
     let Some(directory) = runtime.parent() else { return };
-    let existing = std::env::var("PATH").unwrap_or_default();
-    unsafe { std::env::set_var("PATH", format!("{};{existing}", directory.display())) };
+    // Windows finds a library's neighbours on PATH; elsewhere the loader does not look there
+    if cfg!(windows) {
+        let existing = std::env::var("PATH").unwrap_or_default();
+        unsafe { std::env::set_var("PATH", format!("{};{existing}", directory.display())) };
+    }
     if card == Some(OnnxCard::DirectMl) {
         preload(&directory.join("DirectML.dll"));
     }
@@ -1104,7 +1162,7 @@ impl LyricsSync {
     pub fn machine_runtime(&self) -> Option<(PathBuf, Option<OnnxCard>)> {
         let cuda = self.downloader.runtime_dir("onnx-cuda").join("onnxruntime.dll");
         let directml = self.downloader.runtime_dir("onnx-dml").join("onnxruntime.dll");
-        let cpu = self.downloader.runtime_dir("onnx").join("onnxruntime.dll");
+        let cpu = ort_library_in(&self.downloader.runtime_dir("onnx"));
         match OnnxFlavour::Auto.card() {
             Some(OnnxCard::Cuda) if self.has_cuda_libraries() => return Some((cuda, Some(OnnxCard::Cuda))),
             Some(OnnxCard::DirectMl) if self.has_directml_libraries() => return Some((directml, Some(OnnxCard::DirectMl))),
@@ -2101,6 +2159,18 @@ Third");
         assert!(!config.available());
         config.provider = AsrProvider::Whisper;
         assert!(config.available());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_processor_runtime_is_found_by_its_versioned_name() {
+        let dir = std::env::temp_dir().join(format!("ort-library-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let name = if cfg!(target_os = "macos") { "libonnxruntime.1.30.0.dylib" } else { "libonnxruntime.so.1.30.0" };
+        fs::write(dir.join(name), b"").unwrap();
+        fs::write(dir.join("libonnxruntime_providers_shared.so"), b"").unwrap();
+        assert_eq!(ort_library_in(&dir), dir.join(name));
+        fs::remove_dir_all(&dir).ok();
     }
 }
 

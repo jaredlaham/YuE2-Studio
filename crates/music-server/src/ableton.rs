@@ -21,12 +21,57 @@ use regex::Regex;
 /// the Reverb and Delay returns and the main track.
 pub const LIVE_12_TEMPLATE: &[u8] = include_bytes!("../assets/kinetic/live12-default.als");
 
+/// An audio clip and a MIDI clip as Live 12.4.6 saved them in Arrangement
+/// view, with what belongs to that set taken out: the sample's name and paths,
+/// its size, checksum and date, its warp markers, and the notes and clip
+/// envelopes of the MIDI file it came from.
+const AUDIO_CLIP: &str = include_str!("../assets/kinetic/live12-audio-clip.xml");
+const MIDI_CLIP: &str = include_str!("../assets/kinetic/live12-midi-clip.xml");
+
 /// One track to make, named as it shows in Live.
 #[derive(Debug, Clone)]
 pub struct TrackPlan {
     pub name: String,
     /// One of Live's clip colour indices (0..=69).
     pub color: u32,
+    /// What the track holds at bar 1, if anything.
+    pub clip: Option<Clip>,
+}
+
+/// A clip at the start of the arrangement.
+#[derive(Debug, Clone)]
+pub enum Clip {
+    Audio(AudioClip),
+    Midi(MidiClip),
+}
+
+#[derive(Debug, Clone)]
+pub struct AudioClip {
+    pub name: String,
+    /// The sample's path from the folder the set is in, with `/` between folders.
+    pub relative_path: String,
+    pub frames: u64,
+    pub sample_rate: u32,
+    pub file_size: u64,
+    /// When the sample was last changed, in seconds since 1970.
+    pub modified: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct MidiClip {
+    pub name: String,
+    /// The clip's length in beats (quarter notes).
+    pub beats: f64,
+    pub notes: Vec<ClipNote>,
+}
+
+/// A note, timed in beats (quarter notes) from the clip's start.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClipNote {
+    pub key: u8,
+    pub time: f64,
+    pub duration: f64,
+    pub velocity: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +120,7 @@ fn global_ids() -> &'static Regex {
 }
 
 /// A copy of a track with its own track id, fresh set-wide ids, a name and a colour.
-fn copy_track(block: &str, kind: &str, track_id: u64, next: &mut u64, plan: &TrackPlan) -> Result<String> {
+fn copy_track(block: &str, kind: &str, track_id: u64, next: &mut u64, plan: &TrackPlan, set: &SetPlan) -> Result<String> {
     let renumbered = global_ids().replace_all(block, |captures: &regex::Captures| {
         let id = *next;
         *next += 1;
@@ -97,7 +142,135 @@ fn copy_track(block: &str, kind: &str, track_id: u64, next: &mut u64, plan: &Tra
     let color_at = text[name_start..].find("<Color Value=\"").map(|at| at + name_start).ok_or_else(|| anyhow!("a {kind} without a colour"))?;
     let color_end = text[color_at..].find("/>").map(|at| at + color_at + 2).ok_or_else(|| anyhow!("a broken colour"))?;
     text.replace_range(color_at..color_end, &format!(r#"<Color Value="{}" />"#, plan.color.min(69)));
+    if let Some(clip) = &plan.clip {
+        match (kind, clip) {
+            ("MidiTrack", Clip::Midi(_)) | ("AudioTrack", Clip::Audio(_)) => {}
+            _ => bail!("{} cannot go on a {kind}", clip_name(clip)),
+        }
+        place_clip(&mut text, kind, &clip_xml(clip, plan.color, set.bpm, set.meter)?, clip_name(clip))?;
+    }
     Ok(text)
+}
+
+/// Sets the first `<tag Value="…" />` in `text`.
+fn set_value(text: &mut String, tag: &str, value: &str) -> Result<()> {
+    let open = format!("<{tag} Value=\"");
+    let at = text.find(&open).ok_or_else(|| anyhow!("Live's clip has no {tag}"))? + open.len();
+    let end = text[at..].find('"').ok_or_else(|| anyhow!("a broken {tag}"))? + at;
+    text.replace_range(at..end, &attribute(value));
+    Ok(())
+}
+
+fn clip_name(clip: &Clip) -> &str {
+    match clip {
+        Clip::Audio(audio) => &audio.name,
+        Clip::Midi(midi) => &midi.name,
+    }
+}
+
+/// A clip's XML, from Live's own clip with this clip's length, sample or notes put in.
+fn clip_xml(clip: &Clip, color: u32, bpm: f64, meter: (u32, u32)) -> Result<String> {
+    let (mut text, beats) = match clip {
+        Clip::Audio(audio) => {
+            if audio.frames == 0 || audio.sample_rate == 0 {
+                bail!("{} has no audio", audio.name);
+            }
+            (AUDIO_CLIP.to_string(), audio.frames as f64 / f64::from(audio.sample_rate) * bpm / 60.0)
+        }
+        Clip::Midi(midi) => {
+            if !(midi.beats > 0.0) {
+                bail!("{} has no length", midi.name);
+            }
+            (MIDI_CLIP.to_string(), midi.beats)
+        }
+    };
+    let length = format_number(beats);
+    for tag in ["CurrentEnd", "LoopEnd", "OutMarker", "HiddenLoopEnd", "RightTime"] {
+        set_value(&mut text, tag, &length)?;
+    }
+    for tag in ["CurrentStart", "LoopStart", "StartRelative", "HiddenLoopStart", "LeftTime"] {
+        set_value(&mut text, tag, "0")?;
+    }
+    // the whole song once, not repeated if the clip is drawn longer
+    set_value(&mut text, "LoopOn", "false")?;
+    set_value(&mut text, "Name", clip_name(clip))?;
+    set_value(&mut text, "Color", &color.min(69).to_string())?;
+    set_value(&mut text, "Numerator", &meter.0.to_string())?;
+    set_value(&mut text, "Denominator", &meter.1.to_string())?;
+    match clip {
+        Clip::Audio(audio) => {
+            set_value(&mut text, "RelativePath", &audio.relative_path)?;
+            set_value(&mut text, "OriginalFileSize", &audio.file_size.to_string())?;
+            set_value(&mut text, "LastModDate", &audio.modified.to_string())?;
+            set_value(&mut text, "DefaultDuration", &audio.frames.to_string())?;
+            set_value(&mut text, "DefaultSampleRate", &audio.sample_rate.to_string())?;
+            // the markers below are the clip's timing: Live is not to warp it again by ear
+            set_value(&mut text, "SamplesToAutoWarp", "0")?;
+            set_value(&mut text, "MarkersGenerated", "false")?;
+            // Re-Pitch: at the set's tempo the sample plays back at its own rate, untouched
+            set_value(&mut text, "WarpMode", "3")?;
+            let seconds = audio.frames as f64 / f64::from(audio.sample_rate);
+            let markers = format!(
+                "<WarpMarkers>\n\t\t<WarpMarker Id=\"0\" SecTime=\"0\" BeatTime=\"0\" />\n\t\t<WarpMarker Id=\"1\" SecTime=\"{}\" BeatTime=\"{length}\" />\n\t</WarpMarkers>",
+                format_number(seconds)
+            );
+            text = text.replacen("<WarpMarkers />", &markers, 1);
+        }
+        Clip::Midi(midi) => {
+            let mut keys: std::collections::BTreeMap<u8, Vec<ClipNote>> = Default::default();
+            for note in midi.notes.iter().filter(|note| note.duration > 0.0 && note.time >= 0.0 && note.key < 128) {
+                keys.entry(note.key).or_default().push(*note);
+            }
+            let mut next_note = 1u64;
+            let mut tracks = String::from("<KeyTracks>\n");
+            for (index, (key, mut notes)) in keys.into_iter().enumerate() {
+                notes.sort_by(|a, b| a.time.total_cmp(&b.time));
+                tracks.push_str(&format!("\t\t\t<KeyTrack Id=\"{index}\">\n\t\t\t\t<Notes>\n"));
+                for note in notes {
+                    tracks.push_str(&format!(
+                        "\t\t\t\t\t<MidiNoteEvent Time=\"{}\" Duration=\"{}\" Velocity=\"{}\" OffVelocity=\"64\" NoteId=\"{next_note}\" />\n",
+                        format_number(note.time),
+                        format_number(note.duration),
+                        note.velocity.clamp(1, 127)
+                    ));
+                    next_note += 1;
+                }
+                tracks.push_str(&format!("\t\t\t\t</Notes>\n\t\t\t\t<MidiKey Value=\"{key}\" />\n\t\t\t</KeyTrack>\n"));
+            }
+            tracks.push_str("\t\t</KeyTracks>");
+            text = text.replacen("<KeyTracks />", &tracks, 1);
+            let generator = text.find("<NoteIdGenerator>").ok_or_else(|| anyhow!("Live's MIDI clip has no note ids"))?;
+            let mut rest = text[generator..].to_string();
+            set_value(&mut rest, "NextId", &next_note.to_string())?;
+            text.replace_range(generator.., &rest);
+        }
+    }
+    Ok(text)
+}
+
+/// Puts a clip at the start of a track's arrangement: the empty event list
+/// that the track's main sequencer keeps clips in, `ClipTimeable` on a MIDI
+/// track and `Sample` on an audio track, gets it.
+fn place_clip(track: &mut String, kind: &str, clip: &str, name: &str) -> Result<()> {
+    let holder = match kind {
+        "MidiTrack" => "<ClipTimeable>",
+        _ => "<Sample>",
+    };
+    let sequencer = track.find("<MainSequencer>").ok_or_else(|| anyhow!("a {kind} without a sequencer"))?;
+    let sequencer_end = track[sequencer..].find("</MainSequencer>").ok_or_else(|| anyhow!("a broken sequencer"))? + sequencer;
+    let held = track[sequencer..sequencer_end].find(holder).ok_or_else(|| anyhow!("a {kind} without {holder}"))? + sequencer;
+    let events = track[held..sequencer_end].find("<Events />").ok_or_else(|| anyhow!("the {kind} already holds clips"))? + held;
+    let indent = &track[track[..events].rfind('\n').map_or(0, |at| at + 1)..events];
+    let inner = format!("{indent}\t");
+    let body: Vec<String> = clip.trim_end().lines().map(|line| format!("{inner}{line}")).collect();
+    let filled = format!("<Events>\n{}\n{indent}</Events>", body.join("\n"));
+    track.replace_range(events..events + "<Events />".len(), &filled);
+    // Live remembers the first clip's name on the track
+    let remembered = track.find("<MemorizedFirstClipName Value=\"").ok_or_else(|| anyhow!("a {kind} without MemorizedFirstClipName"))?;
+    let mut rest = track[remembered..].to_string();
+    set_value(&mut rest, "MemorizedFirstClipName", name)?;
+    track.replace_range(remembered.., &rest);
+    Ok(())
 }
 
 /// The template with the planned tracks in place of its own, at the planned tempo and meter.
@@ -124,7 +297,7 @@ pub fn build_xml(template: &str, plan: &SetPlan) -> Result<String> {
     let mut tracks = Vec::new();
     for (plans, block, kind) in [(&plan.midi, midi_block, "MidiTrack"), (&plan.audio, audio_block, "AudioTrack")] {
         for track in plans {
-            tracks.push(copy_track(block, kind, track_id, &mut next, track)?);
+            tracks.push(copy_track(block, kind, track_id, &mut next, track, plan)?);
             track_id += 1;
         }
     }
@@ -163,9 +336,55 @@ mod tests {
         SetPlan {
             bpm: 92.0,
             meter: (6, 8),
-            midi: vec![TrackPlan { name: "Lead (from score)".into(), color: 14 }, TrackPlan { name: "Chords (from score)".into(), color: 15 }],
-            audio: ["Mix", "Drums (separated)", "Bass (separated)"].iter().map(|name| TrackPlan { name: (*name).into(), color: 3 }).collect(),
+            midi: vec![TrackPlan { name: "Lead (from score)".into(), color: 14, clip: None }, TrackPlan { name: "Chords (from score)".into(), color: 15, clip: None }],
+            audio: ["Mix", "Drums (separated)", "Bass (separated)"].iter().map(|name| TrackPlan { name: (*name).into(), color: 3, clip: None }).collect(),
         }
+    }
+
+    fn with_clips() -> SetPlan {
+        let mut plan = plan();
+        plan.bpm = 90.0;
+        plan.meter = (4, 4);
+        plan.midi[0].clip = Some(Clip::Midi(MidiClip {
+            name: "Lead".into(),
+            beats: 8.0,
+            notes: vec![
+                ClipNote { key: 62, time: 0.0, duration: 1.0, velocity: 90 },
+                ClipNote { key: 65, time: 1.5, duration: 0.5, velocity: 90 },
+                ClipNote { key: 62, time: 4.0, duration: 2.0, velocity: 100 },
+            ],
+        }));
+        plan.audio[1].clip = Some(Clip::Audio(AudioClip {
+            name: "Drums (separated)".into(),
+            relative_path: "Samples/Imported/Song - Drums (separated).wav".into(),
+            frames: 960_000,
+            sample_rate: 48_000,
+            file_size: 2_880_044,
+            modified: 1_760_000_000,
+        }));
+        plan
+    }
+
+    fn child<'a>(node: roxmltree::Node<'a, 'a>, tag: &str) -> roxmltree::Node<'a, 'a> {
+        node.children().find(|node| node.has_tag_name(tag)).unwrap_or_else(|| panic!("no {tag} under {}", node.tag_name().name()))
+    }
+
+    fn value<'a>(node: roxmltree::Node<'a, 'a>, tag: &str) -> &'a str {
+        node.descendants().find(|node| node.has_tag_name(tag)).unwrap_or_else(|| panic!("no {tag}")).attribute("Value").unwrap()
+    }
+
+    /// The element names of a clip, leaving out the lists whose length is the clip's own.
+    fn clip_shape(node: roxmltree::Node) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut stack = vec![node];
+        while let Some(node) = stack.pop() {
+            names.push(node.tag_name().name().to_string());
+            if ["KeyTracks", "WarpMarkers", "Envelopes", "PerNoteEventStore"].contains(&node.tag_name().name()) {
+                continue;
+            }
+            stack.extend(node.children().filter(|node| node.is_element()).collect::<Vec<_>>().into_iter().rev());
+        }
+        names
     }
 
     /// The element names of a subtree in document order, with values blanked: the shape Live reads.
@@ -246,5 +465,82 @@ mod tests {
         assert!(document.descendants().any(|node| node.attribute("Value") == Some(r#"Lead "A" <1> & 2"#)));
         odd.bpm = 5.0;
         assert!(build_xml(&gunzip(LIVE_12_TEMPLATE).unwrap(), &odd).is_err());
+    }
+
+    #[test]
+    fn clips_sit_where_live_keeps_them_with_the_songs_timing() {
+        let built = gunzip(&build(LIVE_12_TEMPLATE, &with_clips()).unwrap()).unwrap();
+        let document = roxmltree::Document::parse(&built).expect("well-formed XML");
+        let tracks: Vec<roxmltree::Node> = document.descendants().find(|node| node.has_tag_name("Tracks")).unwrap().children().filter(|node| node.is_element()).collect();
+
+        let lead = tracks[0];
+        let events = child(child(child(child(child(lead, "DeviceChain"), "MainSequencer"), "ClipTimeable"), "ArrangerAutomation"), "Events");
+        let clip = child(events, "MidiClip");
+        assert_eq!(clip.attribute("Time"), Some("0"));
+        assert_eq!(value(clip, "CurrentEnd"), "8");
+        assert_eq!(value(clip, "LoopOn"), "false");
+        assert_eq!(value(clip, "Name"), "Lead");
+        let keys: Vec<&str> = clip.descendants().filter(|node| node.has_tag_name("MidiKey")).map(|node| node.attribute("Value").unwrap()).collect();
+        assert_eq!(keys, ["62", "65"]);
+        let notes: Vec<(String, String)> = clip
+            .descendants()
+            .filter(|node| node.has_tag_name("MidiNoteEvent"))
+            .map(|node| (node.attribute("Time").unwrap().to_string(), node.attribute("Duration").unwrap().to_string()))
+            .collect();
+        assert_eq!(notes, [("0".into(), "1".into()), ("4".into(), "2".into()), ("1.5".into(), "0.5".into())]);
+        let ids: HashSet<&str> = clip.descendants().filter_map(|node| node.attribute("NoteId")).collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(value(child(child(clip, "Notes"), "NoteIdGenerator"), "NextId"), "4");
+        assert_eq!(value(lead, "MemorizedFirstClipName"), "Lead");
+
+        // 20 s at 90 BPM is 30 beats, and the markers hold the sample at its own rate
+        let drums = tracks[3];
+        let sample = child(child(child(drums, "DeviceChain"), "MainSequencer"), "Sample");
+        let clip = child(child(child(sample, "ArrangerAutomation"), "Events"), "AudioClip");
+        assert_eq!(value(clip, "CurrentEnd"), "30");
+        assert_eq!(value(clip, "RelativePath"), "Samples/Imported/Song - Drums (separated).wav");
+        assert_eq!(value(clip, "DefaultDuration"), "960000");
+        assert_eq!(value(clip, "DefaultSampleRate"), "48000");
+        assert_eq!(value(clip, "WarpMode"), "3");
+        let markers: Vec<(&str, &str)> = clip.descendants().filter(|node| node.has_tag_name("WarpMarker")).map(|node| (node.attribute("SecTime").unwrap(), node.attribute("BeatTime").unwrap())).collect();
+        assert_eq!(markers, [("0", "0"), ("20", "30")]);
+
+        // tracks without a clip are left empty, and nothing else about any track changed shape
+        let mix = tracks[2];
+        assert!(child(child(child(child(child(mix, "DeviceChain"), "MainSequencer"), "Sample"), "ArrangerAutomation"), "Events").children().all(|node| !node.is_element()));
+        let template = gunzip(LIVE_12_TEMPLATE).unwrap();
+        let original = roxmltree::Document::parse(&template).unwrap();
+        let template_audio = original.descendants().find(|node| node.has_tag_name("AudioTrack")).unwrap();
+        let without_clip = |node: roxmltree::Node| -> Vec<String> {
+            node.descendants().filter(|node| node.is_element() && !node.ancestors().any(|above| above.has_tag_name("AudioClip") || above.has_tag_name("MidiClip"))).map(|node| node.tag_name().name().to_string()).collect()
+        };
+        assert_eq!(without_clip(drums), shape(template_audio));
+    }
+
+    #[test]
+    fn a_clip_goes_only_on_its_kind_of_track() {
+        let mut wrong = with_clips();
+        wrong.audio[0].clip = wrong.midi[0].clip.clone();
+        assert!(build_xml(&gunzip(LIVE_12_TEMPLATE).unwrap(), &wrong).is_err());
+    }
+
+    /// Our clips against a set Live saved with clips in it: the same elements,
+    /// in the same place. Run with KINETIC_LIVE_CLIP_SET naming such a set
+    /// (an audio clip on its first audio track, a MIDI clip on its first MIDI track).
+    #[test]
+    #[ignore]
+    fn clips_match_a_set_live_saved() {
+        let path = std::env::var("KINETIC_LIVE_CLIP_SET").expect("KINETIC_LIVE_CLIP_SET");
+        let theirs = gunzip(&std::fs::read(path).unwrap()).unwrap();
+        let theirs = roxmltree::Document::parse(&theirs).unwrap();
+        let ours = gunzip(&build(LIVE_12_TEMPLATE, &with_clips()).unwrap()).unwrap();
+        let ours = roxmltree::Document::parse(&ours).unwrap();
+        for tag in ["AudioClip", "MidiClip"] {
+            let mine = ours.descendants().find(|node| node.has_tag_name(tag)).unwrap();
+            let live = theirs.descendants().find(|node| node.has_tag_name(tag)).unwrap();
+            assert_eq!(clip_shape(mine), clip_shape(live), "{tag}");
+            let path = |node: roxmltree::Node| node.ancestors().skip(1).take(6).map(|node| node.tag_name().name().to_string()).collect::<Vec<_>>();
+            assert_eq!(path(mine), path(live), "{tag}");
+        }
     }
 }

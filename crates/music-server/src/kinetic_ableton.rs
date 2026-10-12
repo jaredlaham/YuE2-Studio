@@ -3,10 +3,11 @@
 //! at the score's tempo and meter, with the audio and MIDI files beside it in
 //! the folders Live's own "Collect All and Save" uses.
 //!
-//! The clips are not placed on the tracks yet: how Live 12 writes a clip has
-//! not been seen in a set it saved, and a guessed clip could make Live refuse
-//! the whole file. Until it is, the read-me in the folder says which file goes
-//! on which track.
+//! Every file is on its track as a clip at bar 1, written from the clips of a
+//! set Live 12 saved (see `ableton`). Audio clips are warped with two markers,
+//! the sample's first and last frame, at the set's tempo, so they play at their
+//! own rate. The read-me says which file is on which track as well, so the
+//! project can be put back together by hand if Live does not take a clip.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -20,7 +21,8 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::ableton::{self, SetPlan, TrackPlan};
+use crate::ableton::{self, AudioClip, Clip, ClipNote, MidiClip, SetPlan, TrackPlan};
+use crate::score::smf;
 use crate::{api_error, kinetic_midi, ApiError, AppState};
 
 /// Live's clip colours for each stem, so a set reads the same way every time.
@@ -64,9 +66,12 @@ fn read_me(contents: &Contents, files: &[(String, String)]) -> String {
     let mut text = format!(
         "{title} - Kinetic Studio project for Ableton Live 12\n\n\
          Open \"{title}.als\". The set is at {bpm} BPM in {num}/{den}{tempo_note}.\n\n\
-         Each track is named for the file that belongs on it. Kinetic Studio does not place the clips yet;\n\
-         drag each file from Samples/Imported or MIDI onto its track at bar 1 in Arrangement view.\n\
-         Every audio file starts at the song's first sample and has the song's exact length, so at bar 1 they line up.\n\n",
+         Each file is on its track as a clip at bar 1 in Arrangement view, named for the file.\n\
+         Every audio file starts at the song's first sample and has the song's exact length, so at bar 1 they line up.\n\
+         Audio clips are warped in Re-Pitch with a marker at the first and last sample: at this tempo they play at\n\
+         their own speed. Changing the set's tempo changes their speed and pitch together.\n\
+         If Live asks for a file, it is in Samples/Imported or MIDI below; if a clip is missing, drag the file\n\
+         onto its track at bar 1.\n\n",
         title = contents.title,
         bpm = contents.bpm,
         num = contents.meter.0,
@@ -88,6 +93,35 @@ fn read_me(contents: &Contents, files: &[(String, String)]) -> String {
     text
 }
 
+/// An audio file as Live's clip: its length in frames and rate from decoding it.
+fn audio_clip(name: &str, relative_path: String, path: &Path) -> Result<AudioClip> {
+    let (channels, sample_rate) = crate::audio_pcm::decode_channels(path)?;
+    let frames = channels.first().map_or(0, Vec::len) as u64;
+    let meta = std::fs::metadata(path).with_context(|| format!("read {}", path.display()))?;
+    let modified = meta.modified().ok().and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |since| since.as_secs());
+    Ok(AudioClip { name: name.into(), relative_path, frames, sample_rate, file_size: meta.len(), modified })
+}
+
+/// A MIDI file as Live's clip: every note of every track, in quarter notes,
+/// as long as the file (and never shorter than its last note).
+fn midi_clip(name: &str, bytes: &[u8]) -> Result<MidiClip> {
+    let song = smf::read(bytes).map_err(|reason| anyhow::anyhow!("{name}: {reason}"))?;
+    let division = f64::from(song.division);
+    let notes: Vec<ClipNote> = song
+        .tracks
+        .iter()
+        .flat_map(|track| track.notes.iter())
+        .map(|note| ClipNote { key: note.pitch, time: note.start as f64 / division, duration: note.end.saturating_sub(note.start) as f64 / division, velocity: note.velocity })
+        .collect();
+    let last = song.tracks.iter().flat_map(|track| track.notes.iter()).map(|note| note.end).max().unwrap_or(0);
+    let beats = song.end().max(last) as f64 / division;
+    Ok(MidiClip { name: name.into(), beats, notes })
+}
+
+fn stem_of(file_name: &str) -> &str {
+    file_name.rsplit_once('.').map_or(file_name, |(stem, _)| stem)
+}
+
 /// The project as a zip at `target`: the set, the audio, the MIDI and a read-me.
 pub fn write_project(contents: &Contents, target: &Path) -> Result<Vec<String>> {
     let title = safe(&contents.title);
@@ -96,21 +130,25 @@ pub fn write_project(contents: &Contents, target: &Path) -> Result<Vec<String>> 
     let mut audio_tracks = Vec::new();
     let mix_extension = contents.mix.extension().and_then(|value| value.to_str()).unwrap_or("wav").to_ascii_lowercase();
     let mix_name = format!("{title} - Mix.{mix_extension}");
-    audio_tracks.push(TrackPlan { name: "Mix".into(), color: 23 });
-    files.push(("Mix".into(), format!("Samples/Imported/{mix_name}")));
-    let mut audio_files = vec![(mix_name, contents.mix.clone())];
+    let mut audio_files = vec![("Mix".to_string(), 23, mix_name, contents.mix.clone())];
     for (stem, path) in &contents.stems {
         let track = format!("{} (separated)", label(stem));
         let name = format!("{title} - {track}.wav");
-        audio_tracks.push(TrackPlan { name: track.clone(), color: stem_color(stem) });
-        files.push((track, format!("Samples/Imported/{name}")));
-        audio_files.push((name, path.clone()));
+        audio_files.push((track, stem_color(stem), name, path.clone()));
     }
-    let midi_tracks: Vec<TrackPlan> = contents.midi.iter().map(|(track, _, _)| TrackPlan { name: track.clone(), color: 14 }).collect();
-    for (track, name, _) in &contents.midi {
+    for (track, color, name, path) in &audio_files {
+        let relative = format!("Samples/Imported/{name}");
+        let clip = audio_clip(stem_of(name), relative.clone(), path)?;
+        audio_tracks.push(TrackPlan { name: track.clone(), color: *color, clip: Some(Clip::Audio(clip)) });
+        files.push((track.clone(), relative));
+    }
+    let mut midi_tracks = Vec::new();
+    for (track, name, bytes) in &contents.midi {
+        midi_tracks.push(TrackPlan { name: track.clone(), color: 14, clip: Some(Clip::Midi(midi_clip(stem_of(name), bytes)?)) });
         files.push((track.clone(), format!("MIDI/{name}")));
     }
     let set = ableton::build(ableton::LIVE_12_TEMPLATE, &SetPlan { bpm: contents.bpm, meter: contents.meter, midi: midi_tracks, audio: audio_tracks })?;
+    let audio_files: Vec<(String, PathBuf)> = audio_files.into_iter().map(|(_, _, name, path)| (name, path)).collect();
 
     let partial = target.with_extension("zip.part");
     let file = std::fs::File::create(&partial).with_context(|| format!("create {}", partial.display()))?;
@@ -202,7 +240,7 @@ pub async fn start(State(state): State<AppState>, Json(start): Json<Start>) -> R
         "tempo_from_score": summary.2,
         "bpm": summary.3,
         "meter": format!("{}/{}", summary.4 .0, summary.4 .1),
-        "clips_placed": false,
+        "clips_placed": true,
     })))
 }
 
@@ -228,17 +266,32 @@ mod tests {
     fn a_project_holds_the_set_the_files_and_a_read_me() {
         let dir = std::env::temp_dir().join(format!("kinetic-ableton-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        let wav = |path: &Path, frames: u32| {
+            let spec = hound::WavSpec { channels: 2, sample_rate: 48_000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+            let mut writer = hound::WavWriter::create(path, spec).unwrap();
+            for _ in 0..frames * 2 {
+                writer.write_sample(0i16).unwrap();
+            }
+            writer.finalize().unwrap();
+        };
         let mix = dir.join("mix.wav");
-        std::fs::write(&mix, b"RIFF mix").unwrap();
+        wav(&mix, 96_000);
         let drums = dir.join("drums.wav");
-        std::fs::write(&drums, b"RIFF drums").unwrap();
+        wav(&drums, 96_000);
+        // two beats of D, then two of F
+        let lead = smf::write(
+            &[vec![], vec![(0, smf::note_on(0, 62, 90)), (960, smf::note_off(0, 62)), (960, smf::note_on(0, 65, 80)), (1920, smf::note_off(0, 65))]],
+            smf::DIVISION,
+            1920,
+        )
+        .unwrap();
         let contents = Contents {
             title: "Night: drive".into(),
             bpm: 92.0,
             meter: (4, 4),
             mix,
             stems: vec![("drums".into(), drums)],
-            midi: vec![("Lead (from score)".into(), "Night_ drive - Lead (from score).mid".into(), b"MThd".to_vec())],
+            midi: vec![("Lead (from score)".into(), "Night_ drive - Lead (from score).mid".into(), lead)],
             tempo_from_score: true,
         };
         let target = dir.join("out.zip");
@@ -258,12 +311,27 @@ mod tests {
             assert!(xml.contains(&format!(r#"<UserName Value="{name}" />"#)), "{name} track");
         }
         assert!(xml.contains(r#"<Manual Value="92" />"#));
+        // each file is on its track: 2 s at 92 BPM is 3.0666… beats
+        let document = roxmltree::Document::parse(&xml).unwrap();
+        let paths: Vec<&str> = document.descendants().filter(|node| node.has_tag_name("RelativePath")).filter_map(|node| node.attribute("Value")).filter(|value| value.starts_with("Samples/")).collect();
+        assert_eq!(paths, ["Samples/Imported/Night_ drive - Mix.wav", "Samples/Imported/Night_ drive - Drums (separated).wav"]);
+        let audio = document.descendants().find(|node| node.has_tag_name("AudioClip")).unwrap();
+        let end: f64 = audio.descendants().find(|node| node.has_tag_name("CurrentEnd")).unwrap().attribute("Value").unwrap().parse().unwrap();
+        assert!((end - 2.0 * 92.0 / 60.0).abs() < 1e-9);
+        let lead = document.descendants().find(|node| node.has_tag_name("MidiClip")).unwrap();
+        let notes: Vec<(&str, &str, &str)> = lead
+            .descendants()
+            .filter(|node| node.has_tag_name("MidiNoteEvent"))
+            .map(|node| (node.attribute("Time").unwrap(), node.attribute("Duration").unwrap(), node.attribute("Velocity").unwrap()))
+            .collect();
+        assert_eq!(notes, [("0", "2", "90"), ("2", "2", "80")]);
         let mut drums_back = Vec::new();
         archive.by_name("Night_ drive Project/Samples/Imported/Night_ drive - Drums (separated).wav").unwrap().read_to_end(&mut drums_back).unwrap();
-        assert_eq!(drums_back, b"RIFF drums", "the audio goes in byte for byte");
+        assert_eq!(drums_back, std::fs::read(&dir.join("drums.wav")).unwrap(), "the audio goes in byte for byte");
         let mut readme = String::new();
         archive.by_name("Night_ drive Project/READ ME.txt").unwrap().read_to_string(&mut readme).unwrap();
         assert!(readme.contains("Drums (separated) -> Samples/Imported/Night_ drive - Drums (separated).wav"));
+        assert!(readme.contains("as a clip at bar 1"));
         assert!(readme.contains("not an original recording"));
         assert!(!target.with_extension("zip.part").exists());
         std::fs::remove_dir_all(&dir).ok();

@@ -116,7 +116,9 @@ fn attribute(value: &str) -> String {
 
 fn global_ids() -> &'static Regex {
     static PATTERN: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    PATTERN.get_or_init(|| Regex::new(r#"<(\w*Target|Pointee) Id="(\d+)""#).expect("a valid pattern"))
+    // any element named for a target (`AutomationTarget`, `VolumeModulationTarget`,
+    // `ControllerTargets.0` …) or a pointee draws its id from the set-wide counter
+    PATTERN.get_or_init(|| Regex::new(r#"<([\w.]*Target[\w.]*|Pointee) Id="(\d+)""#).expect("a valid pattern"))
 }
 
 /// A copy of a track with its own track id, fresh set-wide ids, a name and a colour.
@@ -313,6 +315,23 @@ pub fn build_xml(template: &str, plan: &SetPlan) -> Result<String> {
         let manual = main[at..].find("<Manual Value=\"").map(|found| found + at).ok_or_else(|| anyhow!("{tag} has no value"))?;
         let end = main[manual..].find("/>").map(|found| found + manual + 2).ok_or_else(|| anyhow!("a broken {tag}"))?;
         main.replace_range(manual..end, &format!(r#"<Manual Value="{value}" />"#));
+        // the arrangement plays the main track's automation, not the manual value:
+        // Live keeps one envelope each for tempo and time signature, holding a
+        // single event, and that event is what the set actually runs at
+        let target = Regex::new(r#"<AutomationTarget Id="(\d+)""#)?
+            .captures(&main[at..])
+            .map(|found| found[1].to_string())
+            .ok_or_else(|| anyhow!("{tag} has no automation target"))?;
+        let pointee = format!(r#"<PointeeId Value="{target}" />"#);
+        if let Some(envelope) = main.find(&pointee) {
+            let events_end = main[envelope..].find("</Events>").map(|found| found + envelope).ok_or_else(|| anyhow!("a broken {tag} envelope"))?;
+            let events = &main[envelope..events_end];
+            if Regex::new(r#"<(?:Float|Enum)Event "#)?.find_iter(events).count() != 1 {
+                bail!("the template's {tag} envelope is not a single value");
+            }
+            let set = Regex::new(r#"(<(?:Float|Enum)Event Id="\d+" Time="[^"]*" Value=")[^"]*(")"#)?.replace(events, format!("${{1}}{value}${{2}}")).into_owned();
+            main.replace_range(envelope..events_end, &set);
+        }
     }
     xml.replace_range(main_start..main_end, &main);
     Ok(xml)
@@ -437,7 +456,7 @@ mod tests {
         // set-wide ids are unique and below NextPointeeId; track ids are unique
         let next: u64 = document.descendants().find(|node| node.has_tag_name("NextPointeeId")).unwrap().attribute("Value").unwrap().parse().unwrap();
         let mut seen = HashSet::new();
-        for node in document.descendants().filter(|node| node.is_element() && (node.tag_name().name().ends_with("Target") || node.has_tag_name("Pointee"))) {
+        for node in document.descendants().filter(|node| node.is_element() && (node.tag_name().name().contains("Target") || node.has_tag_name("Pointee"))) {
             if let Some(id) = node.attribute("Id") {
                 let id: u64 = id.parse().unwrap();
                 assert!(id < next, "{} id {id} is not below NextPointeeId {next}", node.tag_name().name());
@@ -451,6 +470,26 @@ mod tests {
         let manual = |tag: &str| main.descendants().find(|node| node.has_tag_name(tag)).unwrap().children().find(|node| node.has_tag_name("Manual")).unwrap().attribute("Value").unwrap().to_string();
         assert_eq!(manual("Tempo"), "92");
         assert_eq!(manual("TimeSignature"), "302");
+        // and the automation the arrangement actually plays agrees
+        let envelope_value = |tag: &str| {
+            let target = main.descendants().find(|node| node.has_tag_name(tag)).unwrap().children().find(|node| node.has_tag_name("AutomationTarget")).unwrap().attribute("Id").unwrap();
+            let envelope = main
+                .descendants()
+                .filter(|node| node.has_tag_name("AutomationEnvelope"))
+                .find(|node| node.descendants().any(|inner| inner.has_tag_name("PointeeId") && inner.attribute("Value") == Some(target)))
+                .unwrap();
+            envelope.descendants().find(|node| node.has_tag_name("FloatEvent") || node.has_tag_name("EnumEvent")).unwrap().attribute("Value").unwrap().to_string()
+        };
+        assert_eq!(envelope_value("Tempo"), "92");
+        assert_eq!(envelope_value("TimeSignature"), "302");
+        // every element Live numbers from the set-wide counter, whatever it is called, is unique
+        let mut every = HashSet::new();
+        for node in document.descendants().filter(|node| node.is_element()) {
+            let name = node.tag_name().name();
+            if let (true, Some(id)) = (name.contains("Target") || name == "Pointee", node.attribute("Id")) {
+                assert!(every.insert(id), "{name} repeats id {id}");
+            }
+        }
         // the rest of the set is untouched: returns and main track keep their shape
         let main_before = original.descendants().find(|node| node.has_tag_name("MainTrack")).unwrap();
         assert_eq!(shape(main), shape(main_before));

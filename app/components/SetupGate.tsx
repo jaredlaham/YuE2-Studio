@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RemoteEngineSettings } from './RemoteEngineSettings';
-import { openRouterSettingsChanged } from '../services/studioQueries';
+import { openRouterSettingsChanged, useHubState } from '../services/studioQueries';
 import { Check, ChevronDown, Download, FolderDown, FolderOpen, Loader2, Square, Trash2, X } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
 import { DevicePicker, type Device } from './DevicePicker';
@@ -785,6 +785,8 @@ export const SetupGate: React.FC<{ onReady?: () => void; mode?: 'first-run' | 's
   // The start screen's statistics checkbox: unchecked in Kinetic Studio (nothing is sent unless the person
   // ticks it), and sent with the first download (it counts as seen).
   const [telemetryOn, setTelemetryOn] = useState(false);
+  // a studio built without Studio Hub (Kinetic Studio) has no statistics to offer
+  const hubOn = Boolean(useHubState('en').data);
   const [telemetryPreview, setTelemetryPreview] = useState(false);
   const download = async () => {
     if (!chosenIds || starting) return;
@@ -1062,7 +1064,7 @@ export const SetupGate: React.FC<{ onReady?: () => void; mode?: 'first-run' | 's
             <button
               type="button"
               onClick={() => {
-                if (mode === 'first-run') {
+                if (mode === 'first-run' && hubOn) {
                   setTelemetry(telemetryOn, true).catch((failure: Error) => console.warn('[hub] the statistics choice was not saved:', failure.message));
                 }
                 void download();
@@ -1090,7 +1092,7 @@ export const SetupGate: React.FC<{ onReady?: () => void; mode?: 'first-run' | 's
           )}
         </div>
 
-        {mode === 'first-run' && (
+        {mode === 'first-run' && hubOn && (
           <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
             <label className="inline-flex cursor-pointer items-center gap-2">
               <input type="checkbox" className="h-4 w-4 accent-pink-500" checked={telemetryOn} onChange={(event) => { setTelemetryOn(event.target.checked); setTelemetry(event.target.checked, true).catch((failure: Error) => console.warn('[hub] the statistics choice was not saved:', failure.message)); }} />

@@ -129,6 +129,12 @@ fn configure_studio_runtime_paths() {
             std::env::set_var("YUE_STUDIO_DATA_ROOT", &data_root);
         }
     }
+    // Kinetic Studio does not take the upstream studio's notices or send it
+    // usage statistics: those belong to the upstream project, not this fork.
+    #[cfg(feature = "kinetic")]
+    unsafe {
+        std::env::set_var("YUE_STUDIO_HUB", "off");
+    }
 
     // The service resolves and supervises the engine; the shell only needs the
     // loopback address they agree on.

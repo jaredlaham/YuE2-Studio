@@ -111,7 +111,7 @@ import { SearchPage } from './components/SearchPage';
 import { NewsPage } from './components/NewsPage';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { SetupGate } from './components/SetupGate';
-import { ExportDialog } from './components/ExportDialog';
+import { ExportDialog, MASTER_EVENT, openExport } from './components/ExportDialog';
 import { AgentConsent } from './components/AgentConsent';
 import { EngineStarting } from './components/EngineStarting';
 import { StudioOffline } from './components/StudioOffline';
@@ -209,17 +209,24 @@ function AppContent() {
     };
     const process = (event: Event) => {
       const song = (event as CustomEvent<Song>).detail;
-      if (song) setSongToProcess(song);
+      if (song) { setProcessFromExport(false); setSongToProcess(song); }
+    };
+    // the Export dialog sends a song to be mastered, and gets the result back
+    const master = (event: Event) => {
+      const song = (event as CustomEvent<Song>).detail;
+      if (song) { setProcessFromExport(true); setSongToProcess(song); }
     };
     window.addEventListener('yue:open-stems', open);
     window.addEventListener('yue:open-settings', openSettings);
     window.addEventListener('yue:navigate', navigate);
     window.addEventListener('yue:process-song', process);
+    window.addEventListener(MASTER_EVENT, master);
     return () => {
       window.removeEventListener('yue:open-stems', open);
       window.removeEventListener('yue:open-settings', openSettings);
       window.removeEventListener('yue:navigate', navigate);
       window.removeEventListener('yue:process-song', process);
+      window.removeEventListener(MASTER_EVENT, master);
     };
   }, []);
 
@@ -331,6 +338,7 @@ function AppContent() {
   const [songForReplay, setSongForReplay] = useState<Song | null>(null);
   const [replayRequestRef, setReplayRequestRef] = useState('');
   const [songToProcess, setSongToProcess] = useState<Song | null>(null);
+  const [processFromExport, setProcessFromExport] = useState(false);
   const [songForVideo, setSongForVideo] = useState<Song | null>(null);
 
   // Settings Modal
@@ -1489,6 +1497,8 @@ function AppContent() {
           song={songToProcess}
           onClose={() => setSongToProcess(null)}
           onKept={libraryChanged}
+          startWith={processFromExport ? 'master' : undefined}
+          onKeptSong={processFromExport ? openExport : undefined}
         />
       )}
       {songForReplay && (

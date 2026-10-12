@@ -1,0 +1,116 @@
+name: Kinetic Studio (macOS)
+
+# Kinetic Studio on Apple Silicon (macos-14 is an M1 runner): the service's
+# tests on macOS, then "Kinetic Studio.app" built with the Metal engine,
+# launched, and asked over its loopback API whether it is the Kinetic build
+# and can see its bundled engine. No model weights are downloaded, so nothing
+# here generates music; that needs a Mac with the models installed.
+
+on:
+  push:
+    branches: ["kinetic-studio/**"]
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "desktop/**"
+      - "app/**"
+      - "scripts/build-kinetic-macos.sh"
+      - ".github/workflows/kinetic-macos.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: kinetic-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # the repository pins the Windows toolchain for upstream's release machine
+  RUSTUP_TOOLCHAIN: stable
+  CARGO_TERM_COLOR: never
+
+jobs:
+  service-tests:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Service tests on Apple Silicon
+        run: cargo test --workspace --locked
+
+  app:
+    runs-on: macos-14
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the news page's changelog is read from the history
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            desktop/src-tauri -> target
+      - name: Tools
+        run: brew list ninja >/dev/null 2>&1 || brew install ninja
+      - name: Build Kinetic Studio.app
+        run: bash scripts/build-kinetic-macos.sh
+      - name: Check the bundle
+        run: |
+          set -euo pipefail
+          app="desktop/src-tauri/target/release/bundle/macos/Kinetic Studio.app"
+          test -d "$app"
+          plist="$app/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$plist")" = "Kinetic Studio"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = "com.kineticfields.kinetic-studio"
+          test -x "$app/Contents/MacOS/Kinetic-Studio"
+          engine="$app/Contents/Resources/resources/yue2-cpp/yue-server"
+          test -x "$engine"
+          file "$app/Contents/MacOS/Kinetic-Studio" | grep -q arm64
+          file "$engine" | grep -q arm64
+          "$engine" --help 2>&1 | head -n 5 || true
+          codesign --verify --deep --verbose=2 "$app"
+      - name: Launch and ask the service who it is
+        run: |
+          set -euo pipefail
+          app="desktop/src-tauri/target/release/bundle/macos/Kinetic Studio.app"
+          "$app/Contents/MacOS/Kinetic-Studio" > launch.log 2>&1 &
+          pid=$!
+          ok=""
+          for _ in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8791/health > health.json 2>/dev/null; then ok=1; break; fi
+            sleep 1
+          done
+          cat health.json || true
+          kill "$pid" 2>/dev/null || true
+          sleep 2
+          kill -9 "$pid" 2>/dev/null || true
+          if [ -z "$ok" ]; then echo "the service never answered"; cat launch.log; exit 1; fi
+          python3 - <<'PY'
+          import json
+          health = json.load(open("health.json"))
+          assert health["status"] == "ok", health
+          assert "Kinetic Studio.app" in (health.get("service_executable") or ""), health
+          assert health.get("engine_bundle_present") is True, health
+          print("service answered from the Kinetic Studio bundle with its engine present")
+          PY
+          test -d "$HOME/Library/Application Support/Kinetic Studio"
+      - name: Import, play back and persist a track
+        run: bash scripts/kinetic-smoke.sh "desktop/src-tauri/target/release/bundle/macos/Kinetic Studio.app/Contents/MacOS/Kinetic-Studio" "Kinetic Studio.app"
+      - name: Collect
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cd desktop/src-tauri/target/release/bundle
+          ditto -c -k --keepParent "macos/Kinetic Studio.app" "$GITHUB_WORKSPACE/out/Kinetic-Studio-macos-arm64.app.zip"
+          cp dmg/*.dmg "$GITHUB_WORKSPACE/out/"
+          ls -la "$GITHUB_WORKSPACE/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kinetic-studio-macos-arm64
+          path: out/*
+          retention-days: 14

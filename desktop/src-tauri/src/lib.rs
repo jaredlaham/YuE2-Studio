@@ -14,8 +14,17 @@ use std::{
 };
 
 const SERVER_PORT: u16 = 8791;
+// The Kinetic Studio build (`--features kinetic`) is the same studio under its
+// own name: its own data folder beside an installed YuE2 Studio, and no
+// release page or updater of the upstream project.
+#[cfg(not(feature = "kinetic"))]
 const RELEASES_URL: &str = "https://github.com/timoncool/YuE2-Studio/releases/latest";
+#[cfg(feature = "kinetic")]
+const RELEASES_URL: &str = "https://github.com/jaredlaham/YuE2-Studio/releases";
+#[cfg(not(feature = "kinetic"))]
 const STUDIO_DATA_DIRECTORY: &str = "YuE2 Studio";
+#[cfg(feature = "kinetic")]
+const STUDIO_DATA_DIRECTORY: &str = "Kinetic Studio";
 
 /// Mutable studio data must not be derived from the process working directory
 /// or from the installed executable directory: a Start Menu shortcut is free
@@ -667,7 +676,7 @@ pub fn run() {
                             if let MenuItemKind::Predefined(predefined) = &entry {
                                 if predefined.text()?.starts_with("Quit") {
                                     submenu.remove(predefined)?;
-                                    submenu.append(&MenuItem::with_id(app.handle(), "quit-confirm", "Quit YuE2 Studio", true, Some("CmdOrCtrl+Q"))?)?;
+                                    submenu.append(&MenuItem::with_id(app.handle(), "quit-confirm", format!("Quit {}", app.package_info().name), true, Some("CmdOrCtrl+Q"))?)?;
                                 }
                             }
                         }

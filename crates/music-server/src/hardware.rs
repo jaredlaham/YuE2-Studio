@@ -433,7 +433,10 @@ mod tests {
 
     #[test]
     fn a_set_the_card_holds_needs_the_system_and_loading_memory_only() {
-        assert_eq!(ram_needed_gb("quality-q8", weights("quality-q8"), 12.0), 6.0);
+        // Apple Silicon has no separate video memory: the weights stay in RAM
+        // however much "card" the machine reports.
+        let held = if cfg!(target_os = "macos") { weights("quality-q8") as f64 / 1_000_000_000.0 + WORK_RAM_GB + SYSTEM_RAM_GB } else { 6.0 };
+        assert_eq!(ram_needed_gb("quality-q8", weights("quality-q8"), 12.0), held);
         let light_in_memory = ram_needed_gb("light", weights("light"), 0.0);
         assert!((9.0..9.5).contains(&light_in_memory), "{light_in_memory}");
         assert!(profile_for_machine(8.0, 5.0, weights).is_none());
@@ -481,7 +484,8 @@ mod tests {
         assert_eq!(vram, 16.0);
     }
 
-    #[cfg(not(windows))]
+    // the Linux PCI naming exists only on Linux
+    #[cfg(not(any(windows, target_os = "macos")))]
     #[test]
     fn a_linux_card_is_named_from_its_vendor_when_lspci_is_silent() {
         // No device id resolves through lspci, so the vendor carries the name.
@@ -495,7 +499,8 @@ mod tests {
         assert_eq!(linux_card_name("8086", "ffff").split(' ').next(), Some("Intel"));
     }
 
-    #[cfg(not(windows))]
+    // the Linux PCI naming exists only on Linux
+    #[cfg(not(any(windows, target_os = "macos")))]
     #[test]
     fn an_lspci_line_keeps_the_adapter_name_and_drops_the_class_and_ids() {
         // The real shape of `lspci -nn` on this machine, with a decoy line

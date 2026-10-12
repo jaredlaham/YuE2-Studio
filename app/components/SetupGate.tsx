@@ -781,8 +781,9 @@ export const SetupGate: React.FC<{ onReady?: () => void; mode?: 'first-run' | 's
   // looked untouched: people pressed it again and could not tell which press
   // counted.
   const [starting, setStarting] = useState(false);
-  // The start screen's statistics checkbox: checked, and sent with the first download (it counts as seen).
-  const [telemetryOn, setTelemetryOn] = useState(true);
+  // The start screen's statistics checkbox: unchecked in Kinetic Studio (nothing is sent unless the person
+  // ticks it), and sent with the first download (it counts as seen).
+  const [telemetryOn, setTelemetryOn] = useState(false);
   const [telemetryPreview, setTelemetryPreview] = useState(false);
   const download = async () => {
     if (!chosenIds || starting) return;

@@ -24,6 +24,7 @@ cmake --build "$worktree/build" --config Release --target yue-server \
 
 mkdir -p "$output"
 cp "$worktree/build/yue-server" "$output/"
-# -a keeps the version symlinks of the dylibs; the binary finds them via @rpath.
+# -a keeps the version symlinks of the dylibs; the binary finds them via
+# @rpath, which build-kinetic-macos.sh points at the binary's own folder.
 cp -a "$worktree"/build/*.dylib "$output/"
 echo "yue-server ($commit) built into $output"

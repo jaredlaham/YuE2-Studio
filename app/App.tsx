@@ -112,6 +112,7 @@ import { NewsPage } from './components/NewsPage';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { SetupGate } from './components/SetupGate';
 import { ExportDialog } from './components/ExportDialog';
+import { AgentConsent } from './components/AgentConsent';
 import { EngineStarting } from './components/EngineStarting';
 import { StudioOffline } from './components/StudioOffline';
 import { StudioToolsPanel } from './components/StudioToolsPanel';
@@ -1511,6 +1512,7 @@ function AppContent() {
         />
       )}
       <ExportDialog />
+      <AgentConsent />
       <SettingsModal
         isOpen={showSettingsModal}
         initialSection={settingsSection}

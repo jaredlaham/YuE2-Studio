@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
 import { apiUrl } from '../services/apiBase';
+import { AgentFolders } from './AgentFolders';
 
 /**
  * The studio's MCP server, for the user connecting an agent to it: whether
@@ -104,6 +105,8 @@ export const AgentPanel: React.FC = () => {
         )}
         {failed && <div className="text-red-600 dark:text-red-300">{failed}</div>}
       </div>
+
+      <AgentFolders />
 
       <CopyField label={t('agentAddress')} value={url} />
       <CopyField label="Claude Code" value={`claude mcp add --transport http ${SERVER_NAME} ${url}`} />

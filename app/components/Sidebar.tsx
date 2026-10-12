@@ -27,6 +27,8 @@ type NativeSetupStatus = {
   engine_id: string;
   selected_profile_id?: string | null;
   selected_component_ids?: string[] | null;
+  /** Set when the music engine runs on another computer (Kinetic Studio). */
+  engine_remote?: string | null;
 };
 
 const StatusLine: React.FC<{ active: boolean; pending?: boolean; label: string }> = ({ active, pending, label }) => (
@@ -54,7 +56,7 @@ const SystemWidget: React.FC<{ isOpen?: boolean }> = ({ isOpen }) => {
     : (setup?.selected_component_ids?.length ? t('customSet') : t('noProfile'));
   // Without a model set on disk the engine is not starting, it is waiting.
   const engineLabel = unreachable ? t('engineUnavailable') : engineReady ? t('engineReachable') : modelReady ? t('engineStarting') : tt('engineWaitsForModels');
-  const modelLabel = modelReady ? `${t('profileReady')}: ${profile}` : t('profileNotInstalled');
+  const modelLabel = setup?.engine_remote ? `Models on ${setup.engine_remote}` : modelReady ? `${t('profileReady')}: ${profile}` : t('profileNotInstalled');
 
   if (!isOpen) {
     return (

@@ -39,6 +39,7 @@ pub mod net;
 mod saving;
 mod skins;
 mod kinetic;
+mod remote_engine;
 pub use saving::{set_save_dialog, SaveDialog};
 mod skill;
 mod library;
@@ -148,6 +149,9 @@ struct AppState {
 #[derive(Clone)]
 struct EngineClient {
     base_url: String,
+    /// The engine runs on another computer (Kinetic Studio's remote engine
+    /// setting): the studio starts none of its own and leaves its flags alone.
+    remote: bool,
     http: reqwest::Client,
     /// The last health answer and when it was taken. Every status poll asks,
     /// and on Windows a refused loopback connect takes about two seconds, so
@@ -1075,6 +1079,8 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/activity", get(read_activity))
         .route("/v1/cover-templates", get(read_cover_templates).put(write_cover_templates))
         .route("/v1/kinetic/presets", get(kinetic::list).put(kinetic::save))
+        .route("/v1/kinetic/engine", get(remote_engine::status).put(remote_engine::change))
+        .route("/v1/kinetic/engine/test", post(remote_engine::test))
         .route("/v1/cover-templates/render", post(render_cover_template))
         .route("/v1/openrouter/completions", post(create_openrouter_completion))
         .route("/v1/library/songs", get(library_songs).post(create_library_song))
@@ -1169,7 +1175,7 @@ pub async fn serve() -> anyhow::Result<()> {
                 // holding it is left alone, and the engine comes back after
                 let preparing = state.prepare.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().is_some_and(|job| !job.finished);
                 let card_taken = preparing || state.training.active_run().await.is_some();
-                if ready && !running && !card_taken {
+                if ready && !running && !card_taken && !state.music_server.remote {
                     if was_running {
                         // It was answering and now it is not: the one line that
                         // explains a log which suddenly starts again from
@@ -3917,6 +3923,7 @@ async fn health(State(state): State<AppState>) -> Json<Value> {
         "music_engine": {
             "id": PRIMARY_MUSIC_ENGINE_ID,
             "base_url": state.music_server.base_url,
+            "remote": state.music_server.remote,
             "reachable": engine_ready,
         }
     }))
@@ -4036,7 +4043,7 @@ async fn update_engine_options(
     let _ = persist_studio_settings(&state).await;
 
     let mut restarted = false;
-    if changed && state.music_server.health().await {
+    if changed && !state.music_server.remote && state.music_server.health().await {
         restart_engine(&state).await.map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, error))?;
         restarted = true;
     }
@@ -4053,6 +4060,9 @@ async fn restart_local_engine(State(state): State<AppState>) -> Result<Json<Valu
 }
 
 async fn restart_engine(state: &AppState) -> Result<(), String> {
+    if state.music_server.remote {
+        return Err(format!("The music engine runs on another computer ({}); restart it there.", state.music_server.base_url));
+    }
     let mut supervisor = state.engine.lock().await;
     let owned = supervisor.is_some();
     if let Some(engine) = supervisor.as_mut() {
@@ -4791,6 +4801,18 @@ async fn compose_setup_status(state: &AppState, manager_status: model_manager::M
         fields.insert("ready".into(), Value::Bool(selected_set_ready));
         fields.insert("first_run".into(), Value::Bool(!selected_set_ready));
         if selected_set_ready { fields.insert("download_pending".into(), Value::from(0_u64)); }
+        // A remote engine brings its own models: nothing has to be installed here.
+        if state.music_server.remote {
+            fields.insert("ready".into(), Value::Bool(true));
+            fields.insert("first_run".into(), Value::Bool(false));
+            fields.insert("engine_remote".into(), Value::String(state.music_server.base_url.clone()));
+            if !state.music_server.health().await {
+                fields.insert(
+                    "engine_error".into(),
+                    Value::String(format!("No answer from the music engine at {}. Check that yue-server is running on the other computer and that the SSH tunnel is open.", state.music_server.base_url)),
+                );
+            }
+        }
     }
     status
 }
@@ -8043,14 +8065,20 @@ async fn cancel_score_job(
 
 impl EngineClient {
     fn from_environment() -> Self {
-        let base_url = env::var("YUE_ENGINE_BASE_URL")
-            .unwrap_or_else(|_| format!("http://127.0.0.1:{}", music_engine::yue_server::DEFAULT_PORT))
+        // a remote engine saved in Kinetic Studio's settings wins over the
+        // loopback address the desktop shell always sets
+        let remote = remote_engine::saved_url();
+        let base_url = remote
+            .clone()
+            .or_else(|| env::var("YUE_ENGINE_BASE_URL").ok())
+            .unwrap_or_else(|| format!("http://127.0.0.1:{}", music_engine::yue_server::DEFAULT_PORT))
             .trim_end_matches('/')
             .to_owned();
+        let remote = remote.is_some();
         // the engine's server drops a connection idle for 5 s; a pooled one can be
         // taken as it closes and the request is lost, so every request opens its own
         let http = net::builder().pool_max_idle_per_host(0).build().expect("an HTTP client with a proxy callback builds");
-        Self { base_url, http, health_cache: Arc::new(std::sync::Mutex::new(None)) }
+        Self { base_url, remote, http, health_cache: Arc::new(std::sync::Mutex::new(None)) }
     }
 
     async fn health(&self) -> bool {
@@ -8063,7 +8091,8 @@ impl EngineClient {
         let up = self
             .http
             .get(self.url("/health"))
-            .timeout(std::time::Duration::from_millis(500))
+            // a tunnel to another computer takes longer than loopback to answer
+            .timeout(std::time::Duration::from_millis(if self.remote { 3000 } else { 500 }))
             .send()
             .await
             .map(|response| response.status().is_success())

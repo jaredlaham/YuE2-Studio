@@ -251,3 +251,17 @@ What was added:
 | Builder in a real browser against the real service | Linux container, Chromium | passed: preset compiles, "Use in form" fills style and lyrics exactly, manual edit, undo restores, lock writes a 28-bar chord bed at 118 BPM in Am, saved preset survives a reload. Only the "engine ready" flag was stubbed because no weights are installed here |
 | Compose an instrumental score, then render | needs the engine and weights | **untested**: no weights in the container, none downloaded |
 | A generated instrumental with load time, wall time and peak memory | Your Mac | **unverified** (Phase 2 acceptance) |
+
+### Remote GPU engine (`kinetic-studio/phase-2`)
+
+Settings → Engine and the first-run page can point the studio at `yue-server` on another computer
+(`crates/music-server/src/remote_engine.rs`, `GET/PUT /v1/kinetic/engine`, `POST /v1/kinetic/engine/test`). The
+address is read at launch. While it is set the studio starts no local engine, does not require local model files,
+leaves launch flags alone and refuses to "restart" an engine it does not own. An address that is not loopback is
+warned about because `yue-server` has no auth or TLS; the documented route is an SSH tunnel.
+
+| Check | Where | Result |
+| --- | --- | --- |
+| Address parsing, loopback detection, saved-file round trip | Linux container | 4 tests passed; Rust workspace 367 passed |
+| First-run page → test → save → restart → Create screen with no local models | Linux container, Chromium, a stand-in `yue-server` answering `/health` and `/props` | passed with nothing in the window stubbed: `ready` and `engine_ready` true, no local engine started, options change does not restart, the stand-in going away is reported as "No answer from the music engine at …" |
+| Generating through a real remote `yue-server` | needs a GPU computer with weights | **untested** |

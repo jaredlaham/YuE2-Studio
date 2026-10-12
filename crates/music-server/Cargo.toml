@@ -60,3 +60,6 @@ tower-http.workspace = true
 tower = { version = "0.5", features = ["util"] }
 uuid.workspace = true
 zip.workspace = true
+
+[dev-dependencies]
+roxmltree = "0.21"

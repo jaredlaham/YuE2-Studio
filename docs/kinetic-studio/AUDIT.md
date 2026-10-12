@@ -296,3 +296,23 @@ The song's own file is only read; its SHA-256 is taken before and after, and the
 | Cancel at every stage leaves no file and no `.part` | same | passed |
 | Export dialog in Chromium against the real service | Linux container | passed (only the engine-ready flag stubbed). The written FLAC measured by **ffmpeg's ebur128**: -14.0 LUFS, 44.1 kHz, s16; ffprobe on the MP3: 48 kHz, 192 kb/s |
 | Ableton import of exported files | Your Mac | **unverified** (Phase 6) |
+
+## Phase 4 results so far (`kinetic-studio/phase-4`)
+
+Stems that line up with the mix in a DAW, and ONNX Runtime on the Mac.
+
+| Item | Status | Evidence |
+|---|---|---|
+| ONNX Runtime on macOS | Built: the processor build of ORT 1.30.0 is now downloaded per platform (`onnxruntime-osx-arm64-1.30.0.tgz` on macOS, `linux-x64` on Linux, the Windows zip unchanged), its libraries unpacked from the `.tgz` (`downloads.rs::extract_tgz_libraries`) and found by their versioned name (`lyrics_sync.rs::ort_library_in`) | Verified here on Linux through the app's own install route: the 11.3 MB archive downloaded, `libonnxruntime.so.1.30.0` unpacked, and separation ran on it. The macOS archive is the same layout; it is exercised by the new `stems` CI job on macos-14 |
+| Stem format | 24-bit PCM WAV, TPDF-dithered, at the mix's own sample rate (the model runs at 44.1 kHz; stems are resampled back), cut or padded to the mix's exact frame count, starting at its first sample (`stem_render.rs`) | Unit tests: rate and exact length at 44.1/48/96 kHz, a click stays on its sample after 44.1k→48k, 24-bit readback within 2 LSB, repeatable files |
+| Sum-to-mix report | Every run measures (sum of the six stems − mix) against the mix, and the largest sample error; shown under the stems, kept in each stem's library metadata. A partial set says so instead of a number | Unit test: exact parts read under −100 dB; a missing part reads its share of the mix within 0.1 dB |
+| Labelling | Stems are marked `separated: true` in their metadata, and the panel says they are the model's estimate of each part, not the original recording | Browser check of the stems panel |
+| HT-Demucs on this machine | **Not run here**: the environment's network policy blocks huggingface.co, so the 136 MB model could not be downloaded into this container | The pipeline was run end to end through the service with a *stand-in* ONNX model (six fixed shares of the mix, which separates nothing) on a 20 s, 48 kHz/24-bit track: six stems, each 48 kHz/24-bit/960,000 frames; independent check with ffmpeg + numpy: lag 0 against the mix, sum error −89.8 dB, the only error over −100 dBFS in the first and last ~50 samples (resampler edges) |
+| HT-Demucs on Apple Silicon | CI job `stems` (macos-14, M1) downloads the model and ORT (cached) and separates a synthetic 48 kHz mix (bass line + hi-hats) with the real model, asserting rate, exact length and sum error under −10 dB, and printing the report | Result pending on the PR's CI run |
+
+Known limits, stated rather than hidden:
+
+- The model sees the mix at 44.1 kHz. From a 48 kHz or 96 kHz mix, anything above 22.05 kHz is not in any stem; the sum-to-mix figure includes it. With the stand-in on white-noise hi-hats this is about −30 dB; on music it is usually far smaller.
+- Only the processor build runs on the Mac. A Core ML execution provider is not wired in yet, so separation speed on M1/M2 is whatever the CI job measures, not a GPU figure.
+- Only the 6-stem model exists; "4 stems" today means keeping drums, bass, other and vocals. A dedicated 4-stem model is not added.
+- Loop regions and per-stem pan in the stem player are not done yet.

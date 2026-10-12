@@ -40,8 +40,11 @@ interface SeparationStatus {
   card_runtime_installed: boolean;
   card_missing_bytes: number;
   settings: { stems: string[]; overlap: number; runtime: 'auto' | 'cuda' | 'cpu' };
-  run: { song_id: string; progress: number; done: boolean; error: string | null; stems: string[] } | null;
+  run: { song_id: string; progress: number; done: boolean; error: string | null; stems: string[]; report?: StemReport | null } | null;
 }
+
+/** How the written stems add back up to the mix they came from. */
+interface StemReport { sample_rate: number; bits: number; frames: number; sum_error_db: number | null; sum_peak_error_dbfs: number; all_stems: boolean }
 
 /** Fast, the model's own reference setting, and slow-but-smoothest. */
 const QUALITIES = [
@@ -414,6 +417,19 @@ export function StudioToolsPanel({ initialSongId }: { initialSongId?: string | n
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {stems.length > 0 && (
+            <div className="mt-3 rounded-lg bg-zinc-50 px-3 py-2 text-[11px] leading-5 text-zinc-600 dark:bg-black/25 dark:text-zinc-300">
+              <p>{t('stemsEstimateNote')}</p>
+              {run?.song_id === songId && run.report && (
+                <p className="mt-1 tabular-nums">
+                  {run.report.all_stems && run.report.sum_error_db != null
+                    ? t('stemsSumReport').replace('{db}', run.report.sum_error_db.toFixed(1)).replace('{rate}', String(run.report.sample_rate))
+                    : t('stemsSumPartial')}
+                </p>
+              )}
             </div>
           )}
 

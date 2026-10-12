@@ -213,8 +213,8 @@ No cloud cost has been incurred. GitHub Actions on this public fork are free.
 | UI build, types, tests | Linux container | build OK, `tsc` OK, 79 passed |
 | Desktop shell, default and `--features kinetic` | Linux container (debug) | compiles; with the overlay config merged the binary carries `Kinetic Studio`, `com.kineticfields.kinetic-studio`, `Kinetic-Studio` |
 | `scripts/kinetic-smoke.sh` against the real desktop binary | Linux container under Xvfb | passed: launch, import 48 kHz/24-bit WAV, library lists it, playback bytes identical (sha256), survives restart |
-| Rust tests on Apple Silicon | `kinetic-macos.yml`, `macos-14` | pending CI |
-| `Kinetic Studio.app` build with Metal engine, bundle checks, launch, smoke test | `kinetic-macos.yml`, `macos-14` | pending CI |
+| Rust tests on Apple Silicon | `kinetic-macos.yml`, `macos-14` | passed ([run 38202240169](https://github.com/jaredlaham/YuE2-Studio/actions/runs/38202240169)) |
+| `Kinetic Studio.app` build with Metal engine, bundle checks, launch, smoke test | `kinetic-macos.yml`, `macos-14` | passed ([run 38202240169](https://github.com/jaredlaham/YuE2-Studio/actions/runs/38202240169)): arm64 app and Metal engine, ad-hoc signature verifies, `/health` answers from `Kinetic Studio.app` with the engine present, data in `~/Library/Application Support/Kinetic Studio`, smoke test passed; `.dmg` (62 MB) and zipped `.app` uploaded as the run's artifact |
 | Opens from /Applications, UI usable, import/play/settings by hand | Your Mac | **unverified** |
 
 Observed while testing: at launch the studio contacts `studio-hub.timoncool.workers.dev` (the upstream news feed,

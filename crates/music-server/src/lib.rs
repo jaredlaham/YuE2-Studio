@@ -40,6 +40,7 @@ mod saving;
 mod skins;
 mod kinetic;
 mod remote_engine;
+mod export;
 pub use saving::{set_save_dialog, SaveDialog};
 mod skill;
 mod library;
@@ -1081,6 +1082,10 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/kinetic/presets", get(kinetic::list).put(kinetic::save))
         .route("/v1/kinetic/engine", get(remote_engine::status).put(remote_engine::change))
         .route("/v1/kinetic/engine/test", post(remote_engine::test))
+        .route("/v1/kinetic/exports", post(export::start))
+        .route("/v1/kinetic/exports/{id}", get(export::status))
+        .route("/v1/kinetic/exports/{id}/cancel", post(export::cancel))
+        .route("/v1/kinetic/exports/{id}/file", get(export::file))
         .route("/v1/cover-templates/render", post(render_cover_template))
         .route("/v1/openrouter/completions", post(create_openrouter_completion))
         .route("/v1/library/songs", get(library_songs).post(create_library_song))

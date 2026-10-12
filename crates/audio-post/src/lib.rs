@@ -9,6 +9,8 @@
 pub mod denoise;
 pub mod encode;
 pub mod lifter;
+pub mod loudness;
+pub mod dither;
 pub mod mastering;
 pub mod naturalize;
 pub mod quality;

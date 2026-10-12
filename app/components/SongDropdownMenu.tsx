@@ -6,6 +6,7 @@ import { useI18n } from '../context/I18nContext';
 import { openExternal } from '../services/externalLinks';
 import { apiUrl } from '../services/apiBase';
 import { downloadSongAudio } from '../services/songDownload';
+import { openExport } from './ExportDialog';
 import { openMidi, openStems } from '../services/openStems';
 import { useAuth } from '../context/AuthContext';
 import { ownsSong, useSongActions } from '../context/SongActionsContext';
@@ -24,6 +25,7 @@ import {
     FileMusic,
     Wand2,
     Piano,
+    FileOutput,
 } from 'lucide-react';
 
 /** The one menu of a song. Its actions come from the app through
@@ -312,6 +314,11 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
                 icon={<Download size={14} />}
                 label={t('download')}
                 onClick={handleDownload}
+            />
+            <MenuItem
+                icon={<FileOutput size={14} />}
+                label="Export…"
+                onClick={() => handleAction(() => openExport(song))}
             />
 
             {/* Owner-only Actions */}

@@ -433,7 +433,10 @@ mod tests {
 
     #[test]
     fn a_set_the_card_holds_needs_the_system_and_loading_memory_only() {
-        assert_eq!(ram_needed_gb("quality-q8", weights("quality-q8"), 12.0), 6.0);
+        // Apple Silicon has no separate video memory: the weights stay in RAM
+        // however much "card" the machine reports.
+        let held = if cfg!(target_os = "macos") { weights("quality-q8") as f64 / 1_000_000_000.0 + WORK_RAM_GB + SYSTEM_RAM_GB } else { 6.0 };
+        assert_eq!(ram_needed_gb("quality-q8", weights("quality-q8"), 12.0), held);
         let light_in_memory = ram_needed_gb("light", weights("light"), 0.0);
         assert!((9.0..9.5).contains(&light_in_memory), "{light_in_memory}");
         assert!(profile_for_machine(8.0, 5.0, weights).is_none());

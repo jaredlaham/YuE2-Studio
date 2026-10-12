@@ -3,8 +3,10 @@ name: Kinetic Studio (macOS)
 # Kinetic Studio on Apple Silicon (macos-14 is an M1 runner): the service's
 # tests on macOS, then "Kinetic Studio.app" built with the Metal engine,
 # launched, and asked over its loopback API whether it is the Kinetic build
-# and can see its bundled engine. No model weights are downloaded, so nothing
-# here generates music; that needs a Mac with the models installed.
+# and can see its bundled engine. No music model weights are downloaded, so
+# nothing here generates music; that needs a Mac with the models installed.
+# The stems job downloads the 136 MB HT-Demucs separation model and ONNX
+# Runtime (cached between runs) and separates a test mix with them.
 
 on:
   push:
@@ -38,6 +40,39 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Service tests on Apple Silicon
         run: cargo test --workspace --locked
+
+  stems:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      ORT_URL: https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-osx-arm64-1.30.0.tgz
+      MODEL_URL: https://huggingface.co/StemSplitio/htdemucs-6s-onnx/resolve/49df9b6989cf2150840ea65b0bef77a2e471b678/htdemucs_6s_fp16weights.onnx
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/kinetic-stems
+          key: kinetic-stems-ort-1.30.0-htdemucs-49df9b69
+      - name: Separation model and ONNX Runtime
+        run: |
+          set -euo pipefail
+          mkdir -p ~/kinetic-stems
+          cd ~/kinetic-stems
+          if [ ! -f htdemucs_6s.onnx ]; then curl -fsSL --retry 4 -o htdemucs_6s.onnx "$MODEL_URL"; fi
+          test "$(stat -f %z htdemucs_6s.onnx)" = 136428532
+          if [ ! -f ort.tgz ]; then curl -fsSL --retry 4 -o ort.tgz "$ORT_URL"; fi
+          rm -rf ort && mkdir ort && tar -xzf ort.tgz -C ort
+          ls -la ort/*/lib
+      - name: Separate a 48 kHz mix on Apple Silicon
+        run: |
+          set -euo pipefail
+          lib=$(ls ~/kinetic-stems/ort/*/lib/libonnxruntime.*.dylib | head -n 1)
+          KINETIC_STEMS_MODEL=~/kinetic-stems/htdemucs_6s.onnx ORT_DYLIB_PATH="$lib" \
+            cargo test -p music-server --locked real_model -- --ignored --nocapture
+          # the studio's own unpacking of the same archive
+          KINETIC_ORT_TGZ=~/kinetic-stems/ort.tgz cargo test -p music-server --locked real_ort_archive -- --ignored --nocapture
 
   app:
     runs-on: macos-14

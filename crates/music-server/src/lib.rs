@@ -41,6 +41,7 @@ mod skins;
 mod kinetic;
 mod remote_engine;
 mod export;
+mod stem_render;
 pub use saving::{set_save_dialog, SaveDialog};
 mod skill;
 mod library;
@@ -1397,6 +1398,9 @@ struct SeparationRun {
     used_gpu: Option<bool>,
     /// The library tracks the stems became.
     library_songs: Vec<String>,
+    /// The format the stems were written in and how well they add back up to the mix.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    report: Option<stem_render::StemReport>,
 }
 
 /// What a track made by a tool says about where it came from: the track it
@@ -1430,7 +1434,7 @@ fn cover_like(state: &AppState, from: &library::Song, to: &str) -> anyhow::Resul
 /// wears the original's cover. Separating the song again replaces its stems
 /// in the library instead of adding more: the new ones are in before the old
 /// ones go, so a stem file held open by a player costs nothing but itself.
-fn stems_into_library(state: &AppState, song_id: &str, stems: &[String], overlap: f64) -> anyhow::Result<(Vec<String>, Option<String>)> {
+fn stems_into_library(state: &AppState, song_id: &str, stems: &[String], overlap: f64, report: Option<&stem_render::StemReport>) -> anyhow::Result<(Vec<String>, Option<String>)> {
     let original = state.library.get_song(song_id)?.ok_or_else(|| anyhow::anyhow!("the song {song_id} is gone"))?;
     let replaced: Vec<library::Song> = state
         .library
@@ -1451,7 +1455,8 @@ fn stems_into_library(state: &AppState, song_id: &str, stems: &[String], overlap
             // the words belong to the voice, not to the drums
             lyrics: if stem == "vocals" { original.lyrics.clone() } else { String::new() },
             metadata: serde_json::json!({
-                "derived": derivation(&original, "stems", serde_json::json!({ "stem": stem, "model": "HT-Demucs", "overlap": overlap })),
+                // "separated": an estimate of the part made by the model from the mix, never the part the track was made from
+                "derived": derivation(&original, "stems", serde_json::json!({ "stem": stem, "model": "HT-Demucs", "overlap": overlap, "separated": true, "report": report })),
                 "duration_seconds": duration,
             }),
             generation_settings: Value::Null,
@@ -2966,7 +2971,7 @@ async fn start_separation(
         .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "this track has no stored audio".into()))?;
 
     *state.separation_run.write().await =
-        Some(SeparationRun { song_id: id.clone(), progress: 0.0, done: false, error: None, stems: vec![], used_gpu: None, library_songs: vec![] });
+        Some(SeparationRun { song_id: id.clone(), progress: 0.0, done: false, error: None, stems: vec![], used_gpu: None, library_songs: vec![], report: None });
 
     let model = state.separator.model_path();
     let config = state.separation_config.read().await.clone();
@@ -2975,8 +2980,12 @@ async fn start_separation(
     let background = state.clone();
     let song_id = id.clone();
     tokio::task::spawn_blocking(move || {
-        let outcome = (|| -> anyhow::Result<(Vec<String>, bool)> {
-            let audio = audio_pcm::decode_stereo_44k(&audio_path)?;
+        let outcome = (|| -> anyhow::Result<(Vec<String>, bool, stem_render::StemReport)> {
+            // the mix at its own rate is what the stems are lined up against; the model hears it at 44.1 kHz
+            let mix = audio_pcm::decode_stereo(&audio_path)?;
+            let model_rate = if mix.rate == separation::SAMPLE_RATE { mix.clone() } else { mix.resampled(separation::SAMPLE_RATE)? };
+            let audio: Vec<f32> = model_rate.left.iter().zip(&model_rate.right).flat_map(|(left, right)| [*left, *right]).collect();
+            drop(model_rate);
             let handle = tokio::runtime::Handle::current();
             let separated = separation::separate(&model, &audio, separation::STEMS.len(), overlap, card, |fraction| {
                 let state = background.clone();
@@ -2986,28 +2995,33 @@ async fn start_separation(
                     }
                 });
             })?;
-            let mut written = Vec::new();
             let ran_on_gpu = separated.used_gpu;
-            for stem in separated.stems {
+            // the six together account for the mix; a partial set that is kept does not
+            let all_stems = separated.stems.len() == separation::STEMS.len() && separation::STEMS.iter().all(|stem| wanted.iter().any(|name| name == stem));
+            let fitted = stem_render::fit_to_mix(separated.stems, mix.rate, mix.frames())?;
+            let report = stem_render::report(&fitted, &mix, all_stems);
+            let mut written = Vec::new();
+            for stem in fitted {
                 if !wanted.iter().any(|name| name == stem.name) {
                     continue;
                 }
                 let path = stem_path(&background, &song_id, stem.name);
-                separation::write_wav_stereo(&path, &stem.samples)?;
+                stem_render::write(&path, &stem.audio, stem_render::seed_for(&song_id, stem.name))?;
                 written.push(stem.name.to_string());
             }
-            Ok((written, ran_on_gpu))
+            Ok((written, ran_on_gpu, report))
         })();
         // still on this thread: the stems are hundreds of megabytes to copy
-        let library = outcome.as_ref().ok().map(|(stems, _)| stems_into_library(&background, &song_id, stems, overlap));
+        let library = outcome.as_ref().ok().map(|(stems, _, report)| stems_into_library(&background, &song_id, stems, overlap, Some(report)));
 
         let handle = tokio::runtime::Handle::current();
         handle.spawn(async move {
             if let Some(run) = background.separation_run.write().await.as_mut() {
                 run.done = true;
                 match outcome {
-                    Ok((stems, ran_on_gpu)) => {
+                    Ok((stems, ran_on_gpu, report)) => {
                         run.progress = 1.0;
+                        run.report = Some(report);
                         run.used_gpu = Some(ran_on_gpu);
                         match library {
                             Some(Ok((songs, problem))) => {

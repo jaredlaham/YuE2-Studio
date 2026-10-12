@@ -587,6 +587,9 @@ pub fn picked_file_name(entry: &str) -> &str {
 }
 
 pub fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
+    if archive.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("tgz")) {
+        return extract_tgz_libraries(archive, destination);
+    }
     // Packages ship every architecture they support; only this one belongs
     // here, and flattening the rest would overwrite it with an ARM build.
     const FOREIGN: [&str; 4] = ["arm64", "win-x86", "linux", "osx"];
@@ -609,6 +612,46 @@ pub fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
         let target = destination.join(name);
         let mut out = fs::File::create(&target).with_context(|| format!("create {}", target.display()))?;
         io::copy(&mut entry, &mut out).with_context(|| format!("extract {}", target.display()))?;
+    }
+    fs::remove_file(archive).ok();
+    Ok(())
+}
+
+/// The shared libraries out of a gzipped tar, flattened into the destination:
+/// Microsoft's macOS and Linux ONNX Runtime archives are one platform each, its
+/// libraries under `lib/`. Only regular files are taken - the plain library
+/// names in those archives are symbolic links to the versioned file - and
+/// nothing is written outside the destination.
+pub fn extract_tgz_libraries(archive: &Path, destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination).with_context(|| format!("create {}", destination.display()))?;
+    let file = fs::File::open(archive).with_context(|| format!("open {}", archive.display()))?;
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(io::BufReader::new(file)));
+    let mut taken = 0usize;
+    for entry in tar.entries().with_context(|| format!("read {}", archive.display()))? {
+        let mut entry = entry.context("read tar entry")?;
+        if !entry.header().entry_type().is_file() {
+            continue;
+        }
+        let path = entry.path().context("tar entry path")?.into_owned();
+        let inside = path.to_string_lossy().into_owned();
+        let Some(name) = path.file_name().map(|name| name.to_string_lossy().into_owned()) else { continue };
+        let library = name.ends_with(".dylib") || name.contains(".so");
+        // directly in lib/: the macOS archive also carries a debug-symbol bundle under
+        // lib/*.dSYM whose DWARF file has the library's own name
+        let in_lib = path.parent().and_then(|parent| parent.file_name()).is_some_and(|parent| parent == "lib");
+        if !in_lib || !library || name.starts_with('.') {
+            continue;
+        }
+        let target = destination.join(&name);
+        let partial = destination.join(format!("{name}.part"));
+        let mut out = fs::File::create(&partial).with_context(|| format!("create {}", partial.display()))?;
+        io::copy(&mut entry, &mut out).with_context(|| format!("extract {inside}"))?;
+        drop(out);
+        fs::rename(&partial, &target).with_context(|| format!("publish {}", target.display()))?;
+        taken += 1;
+    }
+    if taken == 0 {
+        bail!("{} held no libraries", archive.display());
     }
     fs::remove_file(archive).ok();
     Ok(())
@@ -722,6 +765,58 @@ mod tests {
         assert_eq!(fs::read_to_string(root.join("out").join("DirectML.dll")).unwrap(), "win");
         assert_eq!(fs::read_to_string(root.join("out").join("readme.txt")).unwrap(), "notes");
         assert!(extract_named_local(&archive, &["bin/arm64-win/DirectML.dll"], &root.join("out")).is_err());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_tgz_runtime_gives_up_its_libraries_and_only_them() {
+        let root = std::env::temp_dir().join(format!("downloads-tgz-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let archive = root.join("onnxruntime.tgz");
+        {
+            let gz = flate2::write::GzEncoder::new(fs::File::create(&archive).unwrap(), flate2::Compression::fast());
+            let mut tar = tar::Builder::new(gz);
+            let mut add = |path: &str, body: &[u8]| {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(body.len() as u64);
+                header.set_mode(0o644);
+                header.set_cksum();
+                tar.append_data(&mut header, path, body).unwrap();
+            };
+            add("onnxruntime-linux-x64-1.30.0/lib/libonnxruntime.so.1.30.0", b"the library");
+            add("onnxruntime-linux-x64-1.30.0/lib/libonnxruntime_providers_shared.so", b"providers");
+            add("onnxruntime-linux-x64-1.30.0/include/onnxruntime_c_api.h", b"header");
+            add("onnxruntime-linux-x64-1.30.0/LICENSE", b"licence");
+            add("onnxruntime-linux-x64-1.30.0/lib/libonnxruntime.so.1.30.0.dSYM/Contents/Resources/DWARF/libonnxruntime.so.1.30.0", b"debug symbols");
+            let mut link = tar::Header::new_gnu();
+            link.set_entry_type(tar::EntryType::Symlink);
+            link.set_size(0);
+            tar.append_link(&mut link, "onnxruntime-linux-x64-1.30.0/lib/libonnxruntime.so", "libonnxruntime.so.1.30.0").unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        let out = root.join("onnx");
+        extract_zip(&archive, &out).unwrap();
+        let mut names: Vec<String> = fs::read_dir(&out).unwrap().flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["libonnxruntime.so.1.30.0", "libonnxruntime_providers_shared.so"]);
+        assert_eq!(fs::read(out.join("libonnxruntime.so.1.30.0")).unwrap(), b"the library");
+        assert!(!archive.exists(), "the archive is removed once unpacked");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    /// Microsoft's real archive, when one is pointed at (`KINETIC_ORT_TGZ`).
+    #[test]
+    #[ignore = "needs an ONNX Runtime .tgz on disk"]
+    fn a_real_ort_archive_unpacks_to_its_library() {
+        let archive = PathBuf::from(std::env::var("KINETIC_ORT_TGZ").expect("KINETIC_ORT_TGZ"));
+        let root = std::env::temp_dir().join(format!("downloads-real-tgz-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let copy = root.join("onnxruntime.tgz");
+        fs::copy(&archive, &copy).unwrap();
+        extract_zip(&copy, &root.join("onnx")).unwrap();
+        for entry in fs::read_dir(root.join("onnx")).unwrap().flatten() {
+            println!("{} {}", entry.file_name().to_string_lossy(), entry.metadata().unwrap().len());
+        }
         fs::remove_dir_all(&root).ok();
     }
 }

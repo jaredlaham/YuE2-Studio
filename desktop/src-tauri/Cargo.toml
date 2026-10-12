@@ -12,6 +12,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# Builds Kinetic Studio: its own data folder and no upstream release page.
+# The product name, bundle id and the disabled updater come from
+# tauri.kinetic-macos.conf.json.
+kinetic = []
+
 [dependencies]
 # The updater's own reqwest, given SOCKS: a SOCKS proxy set in Settings is used for updates too.
 reqwest = { version = "0.13", default-features = false, features = ["socks"] }

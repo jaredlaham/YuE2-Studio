@@ -13,12 +13,22 @@ runner (`.github/workflows/kinetic-macos.yml`). Download the
 `Kinetic-Studio-macos-arm64.app.zip` (or open the `.dmg`) and drag
 **Kinetic Studio.app** to Applications.
 
-The build is ad-hoc signed and not notarized, so the first open needs
-right-click → **Open** → **Open**. If macOS still refuses ("damaged"), run once:
+The build is ad-hoc signed and not notarized, so macOS blocks the first open
+with "“Kinetic Studio” Not Opened … Apple could not verify…". On current macOS
+(15 Sequoia and later) right-click → **Open** no longer gets past it. Either:
 
-```bash
-xattr -dr com.apple.quarantine "/Applications/Kinetic Studio.app"
-```
+- Press **Done**, open **System Settings → Privacy & Security**, scroll to
+  "Kinetic Studio was blocked…", press **Open Anyway** and confirm with your
+  password; or
+- run once in Terminal:
+
+  ```bash
+  xattr -dr com.apple.quarantine "/Applications/Kinetic Studio.app"
+  ```
+
+Opening it without this step needs a Developer ID certificate and Apple
+notarization, which takes a paid Apple Developer Program membership
+(US$99 a year); the project does not have one.
 
 ## Build it yourself
 

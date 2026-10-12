@@ -321,3 +321,14 @@ Known limits, stated rather than hidden:
 The stems card now plays every stem together on one transport (the mix's waveform), with per-stem mute, solo, volume (0 to +6 dB) and pan, and a loop region set by seconds or from the playhead (`StemMixer.tsx`, logic in `services/stemMix.ts` with 4 unit tests). Each stem is an audio element through a gain and a stereo panner; the others follow the first and are re-seeked past 30 ms of drift. Looping is by seeking, so the seam is about a screen frame, not sample-accurate: it is for auditioning, and nothing set here changes the stem files.
 
 Browser check (Chromium, real service, the stand-in stems): after 2.5 s all six elements read 2.525 s; with a 5.0–6.0 s loop the transport stayed between 5.00 and 5.95 s and wrapped three times in 3 s. Mute/solo/pan state shows correctly; their effect on the audio graph is covered by the unit tests of the gain rules, not measured from the output.
+
+## Phase 5 results so far (`kinetic-studio/phase-5`)
+
+MIDI for a DAW, every file named for where its notes come from.
+
+| Item | Status | Evidence |
+|---|---|---|
+| Score MIDI per part | The song's own score (the one it was generated with, from its generation settings or replay request) written as the full score, or one line of it: Lead (`Ins`), Voice line (`Vocal`), Chords. Each file keeps the conductor track: tempo, meter, key and section markers. Parts with no notes are not offered; nothing is generated for a song made without a score (`kinetic_midi.rs`, `score/export.rs::midi_with`) | 5 unit tests: every lead note at its score tick and length (480 PPQ), chords held bar by bar, tempo exactly 60e6/BPM µs, meter, key and marker read back with the studio's SMF reader; a part keeps only its track; an unknown part is refused |
+| Independent check | The files from the running service read with `mido` (a separate MIDI library): format 1, 480 PPQ, 92 BPM, 4/4, D minor, marker `intro`, lead D4 F4 A4 D5 C5 Bb4 at ticks 0/480/960/1440/1920/2880, chords Dm at 0 and Bb at 1920, length 5.217 s (8 beats at 92 BPM) | |
+| Labels | File names end in `(from score)`, `audio to MIDI (estimated)` or `MIDI (edited)`. The Export dialog's MIDI section says the score MIDI is what the model was asked to play and that how closely the recording follows it is not measured; audio-to-MIDI is called an estimate with wrong and missing notes to be expected | Browser check of the Export dialog |
+| Not done | The recording's timing is not compared with the score (no beat tracking runs here; the tempo model is on Hugging Face, which this container cannot reach). Audio-to-MIDI on the Mac still needs the `ace-midi` build checked there. A bass line is not derived from the chords: it would be new notes, not the score's | |

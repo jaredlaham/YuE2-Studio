@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Download, Loader2, X } from 'lucide-react';
 import { saveFile } from '../services/saveFile';
+import { SongMidiFiles } from './SongMidiFiles';
 
 /** Opens the export dialog for a song from anywhere in the window. */
 export const EXPORT_EVENT = 'kinetic:export';
@@ -250,6 +251,8 @@ export const ExportDialog: React.FC = () => {
             </button>
           )}
         </div>
+
+        <SongMidiFiles songId={song.id} />
       </div>
     </div>
   );

@@ -3011,7 +3011,9 @@ mod tests {
             let bytes = axum::body::to_bytes(response.into_body(), 1 << 22).await.unwrap();
             serde_json::from_slice::<Value>(&bytes).unwrap()
         };
-        let outside = reply(json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "library_import_audio", "arguments": { "path": "/etc/hosts" } } })).await;
+        // a file at the top of the disk, `/…` here and `D:\…` on Windows
+        let disk = std::env::current_dir().unwrap().ancestors().last().unwrap().join("kinetic-not-allowed").join("hosts");
+        let outside = reply(json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "library_import_audio", "arguments": { "path": disk } } })).await;
         assert_eq!(outside["result"]["isError"], true);
         assert!(outside["result"]["content"][0]["text"].as_str().unwrap().contains("outside the folders agents may use"));
         // which tools wait for the user's yes in the window

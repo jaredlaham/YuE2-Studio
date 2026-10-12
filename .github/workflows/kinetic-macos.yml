@@ -18,6 +18,9 @@ on:
       - "desktop/**"
       - "app/**"
       - "scripts/build-kinetic-macos.sh"
+      - "scripts/build-yue-runtime.sh"
+      - "scripts/build-midi-runtime.sh"
+      - "scripts/macos-*.sh"
       - ".github/workflows/kinetic-macos.yml"
   workflow_dispatch:
 
@@ -109,6 +112,36 @@ jobs:
           file "$engine" | grep -q arm64
           "$engine" --help 2>&1 | head -n 5 || true
           codesign --verify --deep --verbose=2 "$app"
+      - name: The engines start on a Mac without their build folders
+        run: |
+          set -euo pipefail
+          app="desktop/src-tauri/target/release/bundle/macos/Kinetic Studio.app"
+          for runtime in yue2-cpp music-midi; do
+            bash scripts/macos-check-portable.sh "$app/Contents/Resources/resources/$runtime"
+          done
+          # what Jared's Mac lacks: the folders the engines were compiled in
+          builds="${YUE_ENGINE_BUILD_ROOT:-${TMPDIR:-/tmp}}"
+          hidden="$RUNNER_TEMP/hidden-builds"
+          mkdir -p "$hidden"
+          for build in yue2-engine hot-step-engine; do
+            if [ -d "$builds/$build" ]; then mv "$builds/$build" "$hidden/"; fi
+          done
+          copy="$RUNNER_TEMP/elsewhere/Kinetic Studio.app"
+          mkdir -p "$(dirname "$copy")"
+          ditto "$app" "$copy"
+          for binary in yue2-cpp/yue-server music-midi/music-midi; do
+            status=0
+            "$copy/Contents/Resources/resources/$binary" --help > help.log 2>&1 || status=$?
+            head -n 5 help.log
+            if [ "$status" -ge 128 ] || grep -q "Library not loaded" help.log; then
+              echo "$binary did not start without its build folder (status $status)"
+              cat help.log
+              exit 1
+            fi
+          done
+          for build in yue2-engine hot-step-engine; do
+            if [ -d "$hidden/$build" ]; then mv "$hidden/$build" "$builds/"; fi
+          done
       - name: Launch and ask the service who it is
         run: |
           set -euo pipefail

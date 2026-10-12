@@ -32,6 +32,12 @@ if [ ! -x "$midi/music-midi" ] || [ "$(cat "$midi/runtime.commit" 2>/dev/null)" 
     echo "$midi_commit" > "$midi/runtime.commit"
 fi
 
+# the engines must find their libraries beside them, not in this Mac's build folder
+for runtime in "$engine" "$midi"; do
+    "$root/scripts/macos-relocate.sh" "$runtime"
+    "$root/scripts/macos-check-portable.sh" "$runtime"
+done
+
 cd "$root"
 npm --prefix app install
 npm --prefix desktop install

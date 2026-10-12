@@ -44,7 +44,39 @@ scripts/build-kinetic-macos.sh
 - App data, library, models, settings: `~/Library/Application Support/Kinetic Studio`
 - Model weights are never bundled. The first screen offers a model set; nothing
   downloads until you press download. On 16 GB, the Q8_0 set (5.1 GB) is the
-  suggested starting point; its speed on M1/M2 has not been measured yet.
+  suggested starting point. See "Speed on Apple Silicon" below for a measured run.
+
+## Speed on Apple Silicon
+
+One measured run, Jared's MacBook with an M1 Pro, 16 GB, Q8_0 set, every stage
+on Metal (`MTL0` in the engine log), default settings (midpoint solver, 32
+steps), Dark Cinematic Ambient preset with Max duration raised above the song's length. The song came out
+at 5:12 (312 s) and took 33.6 minutes:
+
+| Stage | What it does | Time | Share |
+|---|---|---|---|
+| Load the language model | | 3.3 s | |
+| Score | writes the ABC score, 2,351 tokens at 18 ms each | 42 s | 2 % |
+| Semantic | writes the audio codes, 7,805 tokens (25 a second of music) at 20 ms each | 157 s | 8 % |
+| Acoustic (NAR) | 32 midpoint steps, two network passes each, over all 7,805 frames at once | 1,734 s | 86 % |
+| Decode (VAE) | latents to 48 kHz stereo, 16 tiles | 77 s | 4 % |
+
+The acoustic stage is where the time goes. Each pass attends over the whole
+song (7,805 frames plus the 2,834-token prompt and score), so its cost grows
+faster than the song's length: a song half as long takes much less than half
+the time there. What shortens it, in Create → Quality:
+
+- **Solver: AB2.** 33 network passes instead of 64 for 32 steps, so about half
+  the acoustic time. The engine's authors measured its sound against midpoint
+  (mel spectra correlated at 0.9996 on a 122 s song at 16 steps).
+- **Fewer flow-matching steps**, for example 16 instead of 32: half again. The
+  engine's own comparison above was run at 16 steps; how it sounds against 32
+  has not been checked on this build.
+- **A shorter Max duration.** The default ceiling is 130 s; the model ends a
+  song when it judges it finished, up to 6:00.
+
+Estimated, not measured: the same 5:12 song with AB2 and 16 steps would spend
+about 7.5 minutes in the acoustic stage and about 12.5 minutes in all.
 
 ## Differences from YuE2 Studio
 

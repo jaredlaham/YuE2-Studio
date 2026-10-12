@@ -11,6 +11,8 @@ interface Made {
   tempo_from_score: boolean;
   bpm: number;
   meter: string;
+  tracks: string[];
+  left_off: string[];
 }
 
 /**
@@ -48,8 +50,9 @@ export const AbletonProject: React.FC<{ songId: string }> = ({ songId }) => {
     <section className="mt-5 border-t border-zinc-200 pt-4 text-xs dark:border-white/10" data-testid="ableton-project">
       <h3 className="flex items-center gap-1.5 text-sm font-bold text-zinc-900 dark:text-white"><SlidersHorizontal size={14} />Ableton Live project</h3>
       <p className="mt-1.5 leading-5 text-zinc-500">
-        A Live 12 set with the mix, each separated stem and each score part on its own track at bar 1, at the score's tempo, with the files beside it.
-        It has not yet been checked by opening it in Live; the read-me inside says which file belongs on which track.
+        A Live 12 set with each separated stem (or the mix, if there are none) and each score part on its own track at bar 1, at the score's tempo,
+        with every file beside it. It stays within Live 12 Lite's 8 tracks. It has not yet been checked by opening it in Live; the read-me inside says
+        which file belongs on which track.
       </p>
       <button
         type="button"
@@ -63,8 +66,9 @@ export const AbletonProject: React.FC<{ songId: string }> = ({ songId }) => {
       {error && <p className="mt-2 text-rose-600 dark:text-rose-300">The project could not be made: {error}</p>}
       {made && (
         <p className="mt-2 leading-5 text-zinc-500" data-testid="ableton-made">
-          {made.file_name}: the mix, {made.stems} {made.stems === 1 ? 'stem' : 'stems'} and {made.midi_parts} MIDI {made.midi_parts === 1 ? 'part' : 'parts'} at {made.bpm} BPM in {made.meter}
-          {made.tempo_from_score ? '.' : '. The song has no score, so that is Live’s default tempo, not the song’s.'}
+          {made.file_name}: {made.tracks.length} {made.tracks.length === 1 ? 'track' : 'tracks'} ({made.tracks.join(', ')}) at {made.bpm} BPM in {made.meter}
+          {made.tempo_from_score ? '.' : '. The song has no score, so that is Live\u2019s default tempo, not the song\u2019s.'}
+          {made.left_off.length > 0 && ` In the folder only: ${made.left_off.map(file => file.split('/').pop()).join(', ')}.`}
           {made.stems === 0 && ' Separate the stems first to get a track for each.'}
         </p>
       )}

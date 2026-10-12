@@ -62,7 +62,22 @@ pub struct Contents {
     pub tempo_from_score: bool,
 }
 
-fn read_me(contents: &Contents, files: &[(String, String)]) -> String {
+/// Live 12 Lite, the edition Kinetic Studio is made to work with, refuses a
+/// ninth audio or MIDI track (returns are not counted).
+pub const LIVE_LITE_TRACKS: usize = 8;
+
+/// What goes on a track and what only goes in the folder. Stems come first:
+/// they are what a set is built from. The score's parts fill the tracks that
+/// are left. The mix gets a track only when there are no stems, since played
+/// with them it would sound every part twice; it is always in the folder.
+fn track_choice(stems: usize, midi: usize) -> (bool, usize, usize) {
+    let stems_on = stems.min(LIVE_LITE_TRACKS);
+    let mix_on = stems == 0;
+    let midi_on = midi.min(LIVE_LITE_TRACKS - stems_on - usize::from(mix_on));
+    (mix_on, stems_on, midi_on)
+}
+
+fn read_me(contents: &Contents, files: &[(String, String)], left_off: &[String]) -> String {
     let mut text = format!(
         "{title} - Kinetic Studio project for Ableton Live 12\n\n\
          Open \"{title}.als\". The set is at {bpm} BPM in {num}/{den}{tempo_note}.\n\n\
@@ -81,6 +96,15 @@ fn read_me(contents: &Contents, files: &[(String, String)]) -> String {
     text.push_str("Track -> file\n");
     for (track, file) in files {
         text.push_str(&format!("  {track} -> {file}\n"));
+    }
+    if !left_off.is_empty() {
+        text.push_str(&format!(
+            "\nIn the folder but not on a track (Live 12 Lite holds {LIVE_LITE_TRACKS} tracks; the stems are on tracks, so the mix is\n\
+             kept as a reference rather than played with them):\n"
+        ));
+        for file in left_off {
+            text.push_str(&format!("  {file}\n"));
+        }
     }
     text.push_str(
         "\nWhat the files are\n\
@@ -122,8 +146,17 @@ fn stem_of(file_name: &str) -> &str {
     file_name.rsplit_once('.').map_or(file_name, |(stem, _)| stem)
 }
 
+/// What a written project holds: its files, the tracks in its set, and the
+/// files that are in the folder but not on a track.
+#[derive(Debug)]
+pub struct Project {
+    pub files: Vec<String>,
+    pub tracks: Vec<String>,
+    pub left_off: Vec<String>,
+}
+
 /// The project as a zip at `target`: the set, the audio, the MIDI and a read-me.
-pub fn write_project(contents: &Contents, target: &Path) -> Result<Vec<String>> {
+pub fn write_project(contents: &Contents, target: &Path) -> Result<Project> {
     let title = safe(&contents.title);
     let root = format!("{title} Project");
     let mut files: Vec<(String, String)> = Vec::new();
@@ -136,14 +169,25 @@ pub fn write_project(contents: &Contents, target: &Path) -> Result<Vec<String>> 
         let name = format!("{title} - {track}.wav");
         audio_files.push((track, stem_color(stem), name, path.clone()));
     }
-    for (track, color, name, path) in &audio_files {
+    let (mix_on, stems_on, midi_on) = track_choice(contents.stems.len(), contents.midi.len());
+    let mut left_off = Vec::new();
+    for (index, (track, color, name, path)) in audio_files.iter().enumerate() {
         let relative = format!("Samples/Imported/{name}");
+        let on = if index == 0 { mix_on } else { index <= stems_on };
+        if !on {
+            left_off.push(relative);
+            continue;
+        }
         let clip = audio_clip(stem_of(name), relative.clone(), path)?;
         audio_tracks.push(TrackPlan { name: track.clone(), color: *color, clip: Some(Clip::Audio(clip)) });
         files.push((track.clone(), relative));
     }
     let mut midi_tracks = Vec::new();
-    for (track, name, bytes) in &contents.midi {
+    for (index, (track, name, bytes)) in contents.midi.iter().enumerate() {
+        if index >= midi_on {
+            left_off.push(format!("MIDI/{name}"));
+            continue;
+        }
         midi_tracks.push(TrackPlan { name: track.clone(), color: 14, clip: Some(Clip::Midi(midi_clip(stem_of(name), bytes)?)) });
         files.push((track.clone(), format!("MIDI/{name}")));
     }
@@ -171,10 +215,10 @@ pub fn write_project(contents: &Contents, target: &Path) -> Result<Vec<String>> 
     for (_, name, bytes) in &contents.midi {
         add(&mut zip, format!("MIDI/{name}"), deflated, &mut bytes.as_slice())?;
     }
-    add(&mut zip, "READ ME.txt".into(), deflated, &mut read_me(contents, &files).as_bytes())?;
+    add(&mut zip, "READ ME.txt".into(), deflated, &mut read_me(contents, &files, &left_off).as_bytes())?;
     zip.finish()?.flush()?;
     std::fs::rename(&partial, target).with_context(|| format!("publish {}", target.display()))?;
-    Ok(listed)
+    Ok(Project { files: listed, tracks: files.into_iter().map(|(track, _)| track).collect(), left_off })
 }
 
 fn made() -> &'static Mutex<HashMap<String, PathBuf>> {
@@ -225,7 +269,7 @@ pub async fn start(State(state): State<AppState>, Json(start): Json<Start>) -> R
         .expect("a free name");
     let written = target.clone();
     let summary = (contents.stems.len(), contents.midi.len(), contents.tempo_from_score, contents.bpm, contents.meter);
-    let listed = tokio::task::spawn_blocking(move || write_project(&contents, &written))
+    let project = tokio::task::spawn_blocking(move || write_project(&contents, &written))
         .await
         .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
         .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}")))?;
@@ -234,7 +278,9 @@ pub async fn start(State(state): State<AppState>, Json(start): Json<Start>) -> R
     Ok(Json(json!({
         "id": token,
         "file_name": target.file_name().and_then(|name| name.to_str()),
-        "files": listed,
+        "files": project.files,
+        "tracks": project.tracks,
+        "left_off": project.left_off,
         "stems": summary.0,
         "midi_parts": summary.1,
         "tempo_from_score": summary.2,
@@ -295,8 +341,10 @@ mod tests {
             tempo_from_score: true,
         };
         let target = dir.join("out.zip");
-        let listed = write_project(&contents, &target).unwrap();
-        assert_eq!(listed, [
+        let project = write_project(&contents, &target).unwrap();
+        assert_eq!(project.tracks, ["Drums (separated)", "Lead (from score)"], "with stems, the mix stays off the tracks");
+        assert_eq!(project.left_off, ["Samples/Imported/Night_ drive - Mix.wav"]);
+        assert_eq!(project.files, [
             "Night_ drive.als",
             "Samples/Imported/Night_ drive - Mix.wav",
             "Samples/Imported/Night_ drive - Drums (separated).wav",
@@ -307,14 +355,15 @@ mod tests {
         let mut set = Vec::new();
         archive.by_name("Night_ drive Project/Night_ drive.als").unwrap().read_to_end(&mut set).unwrap();
         let xml = ableton::gunzip(&set).unwrap();
-        for name in ["Mix", "Drums (separated)", "Lead (from score)"] {
+        for name in ["Drums (separated)", "Lead (from score)"] {
             assert!(xml.contains(&format!(r#"<UserName Value="{name}" />"#)), "{name} track");
         }
+        assert!(!xml.contains(r#"<UserName Value="Mix" />"#));
         assert!(xml.contains(r#"<Manual Value="92" />"#));
         // each file is on its track: 2 s at 92 BPM is 3.0666… beats
         let document = roxmltree::Document::parse(&xml).unwrap();
         let paths: Vec<&str> = document.descendants().filter(|node| node.has_tag_name("RelativePath")).filter_map(|node| node.attribute("Value")).filter(|value| value.starts_with("Samples/")).collect();
-        assert_eq!(paths, ["Samples/Imported/Night_ drive - Mix.wav", "Samples/Imported/Night_ drive - Drums (separated).wav"]);
+        assert_eq!(paths, ["Samples/Imported/Night_ drive - Drums (separated).wav"]);
         let audio = document.descendants().find(|node| node.has_tag_name("AudioClip")).unwrap();
         let end: f64 = audio.descendants().find(|node| node.has_tag_name("CurrentEnd")).unwrap().attribute("Value").unwrap().parse().unwrap();
         assert!((end - 2.0 * 92.0 / 60.0).abs() < 1e-9);
@@ -332,14 +381,31 @@ mod tests {
         archive.by_name("Night_ drive Project/READ ME.txt").unwrap().read_to_string(&mut readme).unwrap();
         assert!(readme.contains("Drums (separated) -> Samples/Imported/Night_ drive - Drums (separated).wav"));
         assert!(readme.contains("as a clip at bar 1"));
+        assert!(readme.contains("not on a track"));
+        assert!(readme.contains("  Samples/Imported/Night_ drive - Mix.wav\n"));
         assert!(readme.contains("not an original recording"));
         assert!(!target.with_extension("zip.part").exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
+    fn a_set_never_has_more_tracks_than_live_lite_takes() {
+        // (mix on, stems on, MIDI parts on)
+        assert_eq!(track_choice(0, 3), (true, 0, 3));
+        assert_eq!(track_choice(6, 3), (false, 6, 2));
+        assert_eq!(track_choice(4, 2), (false, 4, 2));
+        assert_eq!(track_choice(0, 9), (true, 0, 7));
+        for stems in 0..=10 {
+            for midi in 0..=10 {
+                let (mix, on, parts) = track_choice(stems, midi);
+                assert!(usize::from(mix) + on + parts <= LIVE_LITE_TRACKS);
+            }
+        }
+    }
+
+    #[test]
     fn without_a_score_the_read_me_says_the_tempo_is_not_the_songs() {
         let contents = Contents { title: "x".into(), bpm: 120.0, meter: (4, 4), mix: PathBuf::from("m.wav"), stems: vec![], midi: vec![], tempo_from_score: false };
-        assert!(read_me(&contents, &[]).contains("not the song's"));
+        assert!(read_me(&contents, &[], &[]).contains("not the song's"));
     }
 }

@@ -633,10 +633,13 @@ pub fn extract_tgz_libraries(archive: &Path, destination: &Path) -> Result<()> {
             continue;
         }
         let path = entry.path().context("tar entry path")?.into_owned();
-        let inside = path.to_string_lossy().replace('\\', "/");
+        let inside = path.to_string_lossy().into_owned();
         let Some(name) = path.file_name().map(|name| name.to_string_lossy().into_owned()) else { continue };
         let library = name.ends_with(".dylib") || name.contains(".so");
-        if !inside.contains("/lib/") || !library || name.contains('/') || name.starts_with('.') {
+        // directly in lib/: the macOS archive also carries a debug-symbol bundle under
+        // lib/*.dSYM whose DWARF file has the library's own name
+        let in_lib = path.parent().and_then(|parent| parent.file_name()).is_some_and(|parent| parent == "lib");
+        if !in_lib || !library || name.starts_with('.') {
             continue;
         }
         let target = destination.join(&name);
@@ -784,6 +787,7 @@ mod tests {
             add("onnxruntime-linux-x64-1.30.0/lib/libonnxruntime_providers_shared.so", b"providers");
             add("onnxruntime-linux-x64-1.30.0/include/onnxruntime_c_api.h", b"header");
             add("onnxruntime-linux-x64-1.30.0/LICENSE", b"licence");
+            add("onnxruntime-linux-x64-1.30.0/lib/libonnxruntime.so.1.30.0.dSYM/Contents/Resources/DWARF/libonnxruntime.so.1.30.0", b"debug symbols");
             let mut link = tar::Header::new_gnu();
             link.set_entry_type(tar::EntryType::Symlink);
             link.set_size(0);
@@ -797,6 +801,22 @@ mod tests {
         assert_eq!(names, ["libonnxruntime.so.1.30.0", "libonnxruntime_providers_shared.so"]);
         assert_eq!(fs::read(out.join("libonnxruntime.so.1.30.0")).unwrap(), b"the library");
         assert!(!archive.exists(), "the archive is removed once unpacked");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    /// Microsoft's real archive, when one is pointed at (`KINETIC_ORT_TGZ`).
+    #[test]
+    #[ignore = "needs an ONNX Runtime .tgz on disk"]
+    fn a_real_ort_archive_unpacks_to_its_library() {
+        let archive = PathBuf::from(std::env::var("KINETIC_ORT_TGZ").expect("KINETIC_ORT_TGZ"));
+        let root = std::env::temp_dir().join(format!("downloads-real-tgz-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let copy = root.join("onnxruntime.tgz");
+        fs::copy(&archive, &copy).unwrap();
+        extract_zip(&copy, &root.join("onnx")).unwrap();
+        for entry in fs::read_dir(root.join("onnx")).unwrap().flatten() {
+            println!("{} {}", entry.file_name().to_string_lossy(), entry.metadata().unwrap().len());
+        }
         fs::remove_dir_all(&root).ok();
     }
 }

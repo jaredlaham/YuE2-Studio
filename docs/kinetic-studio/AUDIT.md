@@ -219,3 +219,35 @@ No cloud cost has been incurred. GitHub Actions on this public fork are free.
 
 Observed while testing: at launch the studio contacts `studio-hub.timoncool.workers.dev` (the upstream news feed,
 fetched whatever the statistics setting is). The container's proxy blocked it and the studio carried on normally.
+
+---
+
+## Phase 2 results so far (`kinetic-studio/phase-2`)
+
+What was added:
+
+- **Prompt compiler** (`app/services/kineticPrompt.ts`): structured fields (genre, described influences, mood, direction,
+  six instrument groups, sections, arrangement, production, tempo, key, meter, harmony, energy, length, exclusions, and
+  for vocal mode language, voice and lyrics) compiled into YuE2's two real inputs, the `[Tags]` style and the `[Lyrics]`
+  text. Every setting is reported with how it reaches the model: *style* (guidance), *score* (fixed in a chord-bed
+  score), *request* (engine field) or *not sent*, with the reason. Repeats are merged with a note, contradictions
+  ("no drums" with "soft drums") are errors, exclusions are labelled best-effort, a long style is warned about and
+  never cut. Instrumental mode follows m-a-p's own workflow: section tags only as lyrics, "no vocals, no singing, no
+  choir, no spoken words" added, key named in the style as m-a-p's example does.
+- **Lock to score**: tempo, key and meter can be fixed by writing the studio's chord bed (`/v1/score/chord-bed`) and
+  rendering from it. Without the lock they are only words in the style.
+- **Compose an instrumental score**: plans a score from the style and section tags, then moves sung notes to the
+  instrument voice (`/v1/score/instrumental`), as m-a-p's instrumental skill does.
+- **Presets**: the five from the brief, built in; user presets saved, updated and deleted through
+  `GET/PUT /v1/kinetic/presets` (`crates/music-server/src/kinetic.rs`), one file in the data folder written atomically.
+- **Create panel**: the builder sits above the Style card in Studio mode, shows exactly what YuE2 is sent, fills the
+  form's style, lyrics, chain-of-thought and length (the fields stay editable) and can undo that fill.
+
+| Check | Where | Result |
+| --- | --- | --- |
+| Compiler and presets unit tests | Linux container | 15 passed (all 5 presets compile without warnings, ≤50 words, tempo last) |
+| Preset store tests | Linux container | 4 passed; whole Rust workspace 363 passed |
+| UI types, tests, build | Linux container | `tsc` OK, 94 passed, build OK |
+| Builder in a real browser against the real service | Linux container, Chromium | passed: preset compiles, "Use in form" fills style and lyrics exactly, manual edit, undo restores, lock writes a 28-bar chord bed at 118 BPM in Am, saved preset survives a reload. Only the "engine ready" flag was stubbed because no weights are installed here |
+| Compose an instrumental score, then render | needs the engine and weights | **untested**: no weights in the container, none downloaded |
+| A generated instrumental with load time, wall time and peak memory | Your Mac | **unverified** (Phase 2 acceptance) |

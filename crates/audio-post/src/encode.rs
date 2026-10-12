@@ -46,27 +46,34 @@ pub fn fitting_gain(audio: &Stereo) -> f32 {
 /// 24th bit, about -144 dB. Verify mode decodes every frame as it is written
 /// and compares it with the input, and the file gets its sample count and MD5.
 pub fn flac(audio: &Stereo) -> Result<Vec<u8>> {
+    const FULL: f32 = 8_388_607.0;
+    let gain = fitting_gain(audio);
+    let samples: Vec<i32> = audio.left.iter().zip(&audio.right).flat_map(|(left, right)| [*left, *right]).map(|sample| ((sample * gain).clamp(-1.0, 1.0) * FULL).round() as i32).collect();
+    flac_pcm(&samples, 24, audio.rate)
+}
+
+/// Lossless FLAC from interleaved stereo integer samples already at `bits`
+/// (16 or 24): the exporter quantizes (and dithers) itself, so what is
+/// written is exactly what it chose.
+pub fn flac_pcm(samples: &[i32], bits: u32, rate: u32) -> Result<Vec<u8>> {
     use flac_bound::FlacEncoder;
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
-    const FULL: f32 = 8_388_607.0;
-    let frames = audio.frames();
-    let gain = fitting_gain(audio);
-    let samples: Vec<i32> = audio.left.iter().zip(&audio.right).flat_map(|(left, right)| [*left, *right]).map(|sample| ((sample * gain).clamp(-1.0, 1.0) * FULL).round() as i32).collect();
+    let frames = samples.len() / 2;
     // libFLAC writes the header last, so it needs a file it can seek in
     let path = std::env::temp_dir().join(format!("audio-post-{}-{}.flac", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     let written = (|| -> Result<Vec<u8>> {
         let mut encoder = FlacEncoder::new()
             .ok_or_else(|| anyhow!("libFLAC could not make an encoder"))?
             .channels(2)
-            .bits_per_sample(24)
-            .sample_rate(audio.rate)
+            .bits_per_sample(bits)
+            .sample_rate(rate)
             .compression_level(8)
             .verify(true)
             .total_samples_estimate(frames as u64)
             .init_file(&path)
             .map_err(|error| anyhow!("start the FLAC encoder: {error:?}"))?;
-        if encoder.process_interleaved(&samples, frames as u32).is_err() {
+        if encoder.process_interleaved(&samples[..frames * 2], frames as u32).is_err() {
             bail!("encode FLAC: {:?}", encoder.state());
         }
         encoder.finish().map_err(|encoder| anyhow!("finish the FLAC file: {:?}", encoder.state()))?;

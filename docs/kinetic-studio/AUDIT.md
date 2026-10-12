@@ -265,3 +265,34 @@ warned about because `yue-server` has no auth or TLS; the documented route is an
 | Address parsing, loopback detection, saved-file round trip | Linux container | 4 tests passed; Rust workspace 367 passed |
 | First-run page → test → save → restart → Create screen with no local models | Linux container, Chromium, a stand-in `yue-server` answering `/health` and `/props` | passed with nothing in the window stubbed: `ready` and `engine_ready` true, no local engine started, options change does not restart, the stand-in going away is reported as "No answer from the music engine at …" |
 | Generating through a real remote `yue-server` | needs a GPU computer with weights | **untested** |
+
+---
+
+## Phase 3 results so far (`kinetic-studio/phase-3`)
+
+Song menu → **Export…** writes a new file into `<data folder>/exports/` and offers it through the normal Save dialog.
+The song's own file is only read; its SHA-256 is taken before and after, and the export fails rather than writes if it changed.
+
+- Formats: WAV 16 / 24-bit or 32-bit float, FLAC 16 / 24-bit (libFLAC, verify on), MP3 CBR 128–320 kbps (LAME). AIFF is not offered yet.
+- Sample rate: kept, or converted to 44.1 / 48 / 88.2 / 96 kHz (rubato, already in the workspace).
+- Dither: TPDF, added only when samples do not already fit the target's bits; an untouched 16-bit source written at
+  16 or 24 bits is copied sample for sample. MP3 is not dithered.
+- Loudness: optional target (-14, -16, -23 LUFS or custom) reached with **one gain change**, measured to ITU-R BS.1770-4,
+  and held back so the true peak (4× oversampled) stays under the ceiling. There is no limiter or compressor; when the
+  ceiling stops the gain short, the report says by how much. Without a target, a float source too hot for an integer
+  format is turned down to fit, and the report says so.
+- Every export returns a report: written and source format, loudness and true peak before and after, gain, dither, notes.
+- Written as `<name>.part` and renamed when complete; an existing export is never replaced (`name (2).flac`).
+
+| Check | Where | Result |
+| --- | --- | --- |
+| BS.1770 meter on EBU Tech 3341 cases 1–5 (44.1 and 48 kHz) | Linux container, `audio-post` tests | within ±0.1 LU |
+| True peak on an inter-sample peak (fs/4 sine, 45° phase) | same | within 0.2 dB of the analogue peak |
+| Rate and depth of every written WAV/FLAC (3 depths × 3 rates, 2 FLAC depths) read back from the file | `music-server` export tests | passed |
+| Dither only when reducing: 16-bit source → 16-bit WAV identical, → 24-bit FLAC identical | same | passed |
+| Original SHA-256 unchanged; second export gets a new name | same | passed |
+| MP3 frame headers carry the requested bitrate (320/192/128) and rate | same | passed, every frame |
+| Loudness of the written file within ±0.1 LU of -23/-16/-14; ceiling respected | same | passed |
+| Cancel at every stage leaves no file and no `.part` | same | passed |
+| Export dialog in Chromium against the real service | Linux container | passed (only the engine-ready flag stubbed). The written FLAC measured by **ffmpeg's ebur128**: -14.0 LUFS, 44.1 kHz, s16; ffprobe on the MP3: 48 kHz, 192 kb/s |
+| Ableton import of exported files | Your Mac | **unverified** (Phase 6) |

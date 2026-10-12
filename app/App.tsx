@@ -111,6 +111,7 @@ import { SearchPage } from './components/SearchPage';
 import { NewsPage } from './components/NewsPage';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { SetupGate } from './components/SetupGate';
+import { ExportDialog } from './components/ExportDialog';
 import { EngineStarting } from './components/EngineStarting';
 import { StudioOffline } from './components/StudioOffline';
 import { StudioToolsPanel } from './components/StudioToolsPanel';
@@ -1509,6 +1510,7 @@ function AppContent() {
           onCoverSaved={applyCoverUpdate}
         />
       )}
+      <ExportDialog />
       <SettingsModal
         isOpen={showSettingsModal}
         initialSection={settingsSection}

@@ -4621,7 +4621,12 @@ pub(crate) fn studio_version() -> &'static str {
 
 /// Studio Hub for this studio: statistics only after the start screen showed its checkbox, news through the
 /// studio's own proxy setting. A state file that cannot be read leaves the studio without it, said once.
+/// `YUE_STUDIO_HUB=off` (the Kinetic Studio build) leaves it out entirely: no notices are fetched and nothing is sent.
 fn start_hub() -> Option<studio_hub_client::Hub> {
+    if env::var("YUE_STUDIO_HUB").is_ok_and(|value| value.eq_ignore_ascii_case("off")) {
+        eprintln!("[INFO] Studio Hub is off (YUE_STUDIO_HUB=off): no notices, no statistics");
+        return None;
+    }
     let machine = hardware::hardware();
     let name = machine.gpu_name.clone().unwrap_or_default().to_ascii_lowercase();
     let vendor = if machine.nvidia {

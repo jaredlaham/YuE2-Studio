@@ -22,6 +22,10 @@ export const HubSettings: React.FC = () => {
         hubStateChanged();
       });
   };
+  // a studio built without Studio Hub (Kinetic Studio) answers 404: nothing is fetched or sent
+  if (hub.isError) {
+    return <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('hubOff')}</p>;
+  }
   return (
     <div className="space-y-5 text-sm">
       <section className="space-y-3">

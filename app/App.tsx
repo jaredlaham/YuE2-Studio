@@ -4,6 +4,7 @@ import { CreatePanel, type CreateRequest } from './components/CreatePanel';
 import { SongList } from './components/SongList';
 import { RightSidebar } from './components/RightSidebar';
 import { Player } from './components/Player';
+import { QueuePanel } from './components/QueuePanel';
 import { LibraryView } from './components/LibraryView';
 import { CreatePlaylistModal, AddToPlaylistModal } from './components/PlaylistModals';
 import { CoverRegenModal } from './components/CoverRegenModal';
@@ -316,6 +317,13 @@ function AppContent() {
 
   // UI State
   const [showRightSidebar, setShowRightSidebar] = useState(false);
+  // The queue beside the page, opened from the player; kept between sessions.
+  const [showQueue, setShowQueue] = useState(() => {
+    try { return localStorage.getItem('studio.queueOpen') === '1'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('studio.queueOpen', showQueue ? '1' : '0'); } catch { /* kept until a reload */ }
+  }, [showQueue]);
   const [showLeftSidebar, setShowLeftSidebar] = useState(() => window.innerWidth >= 768);
 
   useEffect(() => {
@@ -853,6 +861,28 @@ function AppContent() {
     }
   };
 
+  // The queue panel's edits: a song added at the end, one taken out, the rest cleared.
+  const addSongToQueue = (song: Song) => {
+    if (!song.audioUrl) return;
+    if (playQueue.length === 0 || !currentSong) {
+      playSong(song, [song]);
+    } else {
+      setPlayQueue(prev => [...prev, song]);
+    }
+    showToast(t('queueAdded'));
+  };
+  const removeFromQueue = (index: number) => {
+    if (index === queueIndex) return;
+    setPlayQueue(prev => prev.filter((_, at) => at !== index));
+    if (index < queueIndex) setQueueIndex(at => at - 1);
+  };
+  const clearQueue = () => {
+    const playing = queueIndex >= 0 ? playQueue[queueIndex] : undefined;
+    setPlayQueue(playing ? [playing] : []);
+    setQueueIndex(playing ? 0 : -1);
+  };
+  const playFromQueue = (song: Song) => playSong(song, playQueue);
+
   // An agent connected over MCP works this window like a user
   const VIEWS: View[] = ['create', 'library', 'tools', 'adapters', 'playlist', 'search', 'news'];
   const songById = (id: unknown) => {
@@ -1359,6 +1389,7 @@ function AppContent() {
     addToPlaylist: openAddToPlaylistModal,
     remove: handleDeleteSong,
     update: handleSongUpdate,
+    addToQueue: addSongToQueue,
   };
   const songActions = useMemo<SongActions>(() => ({
     reusePrompt: song => songActionsLatest.current.reusePrompt(song),
@@ -1367,6 +1398,7 @@ function AppContent() {
     addToPlaylist: song => songActionsLatest.current.addToPlaylist(song),
     remove: song => songActionsLatest.current.remove(song),
     update: song => songActionsLatest.current.update(song),
+    addToQueue: song => songActionsLatest.current.addToQueue(song),
   }), []);
 
   return (
@@ -1408,6 +1440,18 @@ function AppContent() {
           {createKept && <Activity mode={showingCreate ? 'visible' : 'hidden'}>{renderContent('create')}</Activity>}
           {!(createKept && showingCreate) && renderContent()}
         </main>
+        {showQueue && !isMobile && (
+          <QueuePanel
+            queue={playQueue}
+            queueIndex={queueIndex}
+            currentSong={currentSong}
+            isPlaying={isPlaying}
+            onPlay={playFromQueue}
+            onRemove={removeFromQueue}
+            onClear={clearQueue}
+            onClose={() => setShowQueue(false)}
+          />
+        )}
       </div>
 
       {(currentSong || selectedSong) && <Player
@@ -1431,6 +1475,8 @@ function AppContent() {
         isLiked={currentSong ? likedSongIds.has(currentSong.id) : false}
         onToggleLike={() => currentSong && toggleLike(currentSong.id)}
         onPlayFirst={playFirst}
+        queueOpen={showQueue}
+        onToggleQueue={() => setShowQueue(open => !open)}
       />}
 
       <PlayerExtras

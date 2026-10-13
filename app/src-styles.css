@@ -3,12 +3,14 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  --color-suno: #09090b;
-  --color-suno-sidebar: #000000;
-  --color-suno-panel: #121214;
-  --color-suno-card: #18181b;
-  --color-suno-hover: #27272a;
-  --color-suno-border: #27272a;
+  /* One near-black for the window, its sidebar and its panels, told apart by
+     hairlines; raised surfaces (cards, the player) one step lighter. */
+  --color-suno: #0e0e10;
+  --color-suno-sidebar: #0e0e10;
+  --color-suno-panel: #111113;
+  --color-suno-card: #1a1a1d;
+  --color-suno-hover: #222226;
+  --color-suno-border: #26262a;
 
   --font-sans: Inter, system-ui, Segoe UI, sans-serif;
 

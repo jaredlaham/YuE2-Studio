@@ -18,7 +18,7 @@ export interface KineticForm {
 }
 
 const CONTROL =
-  'w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-900 outline-hidden transition-colors focus:border-pink-500 disabled:opacity-50 dark:border-white/10 dark:bg-black/25 dark:text-white';
+  'w-full rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs text-zinc-900 outline-hidden transition-colors focus:border-pink-500 disabled:opacity-50 dark:border-transparent dark:bg-white/[0.05] dark:text-white';
 const LABEL = 'mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400';
 const BUTTON =
   'inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-pink-300 disabled:opacity-50 dark:border-white/10 dark:text-zinc-200';
@@ -228,20 +228,19 @@ export const KineticPromptPanel: React.FC<{
   const keyValue = prompt.key ? prompt.key.tonic : '';
 
   return (
-    <div className="overflow-hidden rounded-xl border border-pink-300/40 bg-white dark:border-pink-500/20 dark:bg-suno-card">
+    <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200 dark:bg-suno-card dark:ring-white/[0.04]">
       <button
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-3 py-2 text-left dark:border-white/5 dark:bg-white/5"
+        className="flex w-full items-center gap-1.5 px-3 pt-3 pb-2 text-left text-sm font-medium text-zinc-800 transition-colors hover:text-black dark:text-zinc-200 dark:hover:text-white"
       >
-        <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-          <SlidersHorizontal size={13} />Kinetic prompt builder
-        </span>
-        <ChevronDown size={14} className={`text-zinc-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown size={15} className={`shrink-0 text-zinc-500 transition-transform ${open ? '' : '-rotate-90'}`} />
+        <SlidersHorizontal size={13} className="shrink-0 text-zinc-500" />
+        <span className="truncate">Kinetic prompt builder</span>
       </button>
       {open && (
-        <div className="space-y-3 p-3">
+        <div className="space-y-3 px-3 pb-3 pt-1">
           <div className="flex flex-wrap items-end gap-2">
             <label className="min-w-0 flex-1">
               <span className={LABEL}>Preset</span>

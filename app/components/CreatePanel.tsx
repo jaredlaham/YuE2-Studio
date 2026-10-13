@@ -115,10 +115,10 @@ const PROFILE_LABEL: Record<string, string> = {
 };
 
 const CONTROL =
-  'w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-hidden transition-colors focus:border-pink-500 disabled:opacity-50 dark:border-white/10 dark:bg-black/25 dark:text-white';
+  'w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-hidden transition-colors focus:border-pink-500 disabled:opacity-50 dark:border-transparent dark:bg-white/[0.04] dark:text-white';
 const LABEL = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400';
 const ICON =
-  'rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-200 hover:text-black dark:hover:bg-white/10 dark:hover:text-white disabled:opacity-40';
+  'rounded-full p-1.5 text-zinc-400 transition-colors hover:bg-zinc-200 hover:text-black dark:hover:bg-white/10 dark:hover:text-white disabled:opacity-40';
 const CHIP =
   'rounded-md border border-zinc-200 px-2 py-0.5 font-mono text-[10px] text-zinc-500 transition-colors hover:border-pink-400 hover:text-pink-600 dark:border-white/10 dark:text-zinc-400';
 
@@ -245,15 +245,23 @@ const SliderRow: React.FC<{
   );
 };
 
-const Card: React.FC<{ title: string; icon?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }> = ({ title, icon, actions, children }) => (
-  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-white/5 dark:bg-suno-card">
-    <div className="flex items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-3 py-2 dark:border-white/5 dark:bg-white/5">
-      <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{icon}{title}</span>
-      {actions && <div className="flex items-center gap-1">{actions}</div>}
+// A section of the form as a rounded tile whose title folds it away.
+const Card: React.FC<{ title: string; icon?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }> = ({ title, icon, actions, children }) => {
+  const [open, setOpen] = useState(true);
+  return (
+    <div className="overflow-hidden rounded-2xl bg-white ring-1 ring-zinc-200 dark:bg-suno-card dark:ring-white/[0.04]">
+      <div className="flex items-center justify-between gap-2 px-3 pt-2.5 pb-1">
+        <button type="button" onClick={() => setOpen(value => !value)} aria-expanded={open} className="flex min-w-0 items-center gap-1.5 rounded-md py-1 pr-2 text-sm font-medium text-zinc-800 transition-colors hover:text-black dark:text-zinc-200 dark:hover:text-white">
+          <ChevronDown size={15} className={`shrink-0 text-zinc-500 transition-transform ${open ? '' : '-rotate-90'}`} />
+          {icon && <span className="shrink-0 text-zinc-500">{icon}</span>}
+          <span className="truncate">{title}</span>
+        </button>
+        {actions && open && <div className="flex items-center gap-1">{actions}</div>}
+      </div>
+      {open && <div className="px-3 pb-3 pt-1">{children}</div>}
     </div>
-    <div className="p-3">{children}</div>
-  </div>
-);
+  );
+};
 
 const Stage: React.FC<{ title: string; hint: string; children: React.ReactNode }> = ({ title, hint, children }) => (
   <section>
@@ -1057,14 +1065,30 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     <section className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-suno-panel dark:text-white">
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain custom-scrollbar">
         <div className="space-y-3 p-4 pb-6">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="truncate text-base font-bold">{t('createMusic')}</h1>
-              <p className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-zinc-400">{tt('localInferenceYue')}</p>
+          {/* The mode switch as a pill in the middle, the engine's state beside it */}
+          <div className="flex items-center justify-between gap-2">
+            <h1 className="sr-only">{t('createMusic')}</h1>
+            <span className="w-16 shrink-0" />
+            <div className="flex items-center rounded-full bg-zinc-200/80 p-1 dark:bg-white/[0.06]" role="tablist">
+              {(['studio', 'cover', 'simple'] as const).map(value => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === value}
+                  onClick={() => setMode(value)}
+                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition-all ${mode === value ? 'bg-white text-black shadow-xs dark:bg-white/15 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white'}`}
+                >
+                  {value === 'studio' ? t('studioMode') : value === 'cover' ? tt('coverMode') : t('simpleMode')}
+                </button>
+              ))}
             </div>
-            <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${ready ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300'}`}>
-              <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${ready ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-              {serviceDown ? t('serviceUnavailable') : ready ? t('engineReady') : t('profileRequired')}
+            <span
+              className="flex w-16 shrink-0 items-center justify-end gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400"
+              title={`${tt('localInferenceYue')} · ${serviceDown ? t('serviceUnavailable') : ready ? t('engineReady') : t('profileRequired')}`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${serviceDown ? 'bg-rose-500' : ready ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              YuE2
             </span>
           </div>
 
@@ -1079,21 +1103,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               <div><b>{t('localGenerationUnavailable')}</b><br />{t('downloadProfileFirst')}</div>
             </div>
           )}
-
-          <div className="flex items-center rounded-lg border border-zinc-300 bg-zinc-200 p-1 dark:border-white/5 dark:bg-black/40" role="tablist">
-            {(['studio', 'cover', 'simple'] as const).map(value => (
-              <button
-                key={value}
-                type="button"
-                role="tab"
-                aria-selected={mode === value}
-                onClick={() => setMode(value)}
-                className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-all ${mode === value ? 'bg-white text-black shadow-xs dark:bg-zinc-800 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300'}`}
-              >
-                {value === 'studio' ? t('studioMode') : value === 'cover' ? tt('coverMode') : t('simpleMode')}
-              </button>
-            ))}
-          </div>
 
           {mode === 'simple' && !assistantReady && (
             <Card title={t('songIdea')}>
@@ -1852,7 +1861,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         </div>
       </div>
 
-      <footer className="shrink-0 border-t border-zinc-200 bg-zinc-50/95 p-4 backdrop-blur-sm dark:border-white/5 dark:bg-suno-panel/95">
+      <footer className="shrink-0 bg-zinc-50/95 p-4 backdrop-blur-sm dark:bg-suno-panel/95">
         {takeChoiceOpen && (
           <div role="dialog" aria-label={tt('takeTitle')} className="mb-3 rounded-xl border border-pink-300/50 bg-pink-50 p-3 text-xs leading-5 text-zinc-700 dark:border-pink-500/25 dark:bg-pink-500/10 dark:text-zinc-200">
             <p className="font-semibold text-zinc-900 dark:text-white">{tt('takeTitle')}</p>
@@ -1890,7 +1899,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         <button
           type="button"
           onClick={submit}
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-orange-500 to-pink-600 text-base font-bold text-white shadow-lg transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-linear-to-r from-orange-500 via-orange-500 to-pink-600 text-base font-semibold text-white shadow-lg transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isGenerating ? <Square size={18} /> : <Sparkles size={18} />}
           {t('create')}

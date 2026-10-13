@@ -100,7 +100,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     const renderRow = (song: Song, number: number | null, queue: Song[], showLike: boolean) => {
         const playing = currentSong?.id === song.id;
         return (
-            <div key={song.id} data-mcp-context={`song ${song.id}: ${song.title}`} className="group flex min-w-0 items-center gap-2 rounded-sm p-2 transition-colors hover:bg-zinc-100 dark:hover:bg-white/10 sm:gap-4" onClick={() => onPlaySong(song, queue)}>
+            <div key={song.id} data-mcp-context={`song ${song.id}: ${song.title}`} className="group flex min-w-0 items-center gap-2 rounded-xl p-2 transition-colors hover:bg-zinc-100 dark:hover:bg-white/[0.05] sm:gap-4" onClick={() => onPlaySong(song, queue)}>
                 <span className={`w-6 justify-center text-zinc-400 dark:text-zinc-500 ${playing ? 'hidden' : 'flex group-hover:hidden'}`}>
                     {number === null ? <StemIcon song={song} /> : number}
                 </span>
@@ -108,7 +108,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                     {playing && isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
                 </span>
 
-                <SongCover song={song} size="sm" className="w-10 h-10" />
+                <SongCover song={song} size="sm" className="w-12 h-12 rounded-lg" />
 
                 <div className="flex-1 min-w-0">
                     <div className={`font-medium truncate ${playing ? 'text-pink-600 dark:text-pink-500' : 'text-zinc-900 dark:text-white'}`}>{number === null ? stemName(song) : song.title}</div>
@@ -116,7 +116,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                 </div>
 
                 <div className="hidden text-sm font-mono text-zinc-500 dark:text-zinc-400 sm:block">{song.duration}</div>
-                {showLike && <div className="hidden text-green-500 sm:block"><Heart fill="#22c55e" size={16} /></div>}
+                {showLike && <div className="hidden text-pink-500 sm:block"><Heart fill="currentColor" size={16} /></div>}
                 <div className="relative ml-0 sm:ml-2">
                     <button
                         className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-400 hover:text-black dark:hover:text-white transition-colors"
@@ -162,7 +162,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
     return (
         <>
-        <div className="min-w-0 flex-1 overflow-y-auto bg-white p-4 pb-32 transition-colors duration-300 dark:bg-black sm:p-6 lg:p-10">
+        <div className="min-w-0 flex-1 overflow-y-auto bg-white p-4 pb-32 transition-colors duration-300 dark:bg-suno sm:p-6 lg:p-10">
              <div className="mb-8 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
                 <h1 className="min-w-0 truncate text-2xl font-bold text-zinc-900 dark:text-white sm:text-3xl">{t('yourLibrary')}</h1>
                 <button 
@@ -182,28 +182,28 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                     className={`pb-3 text-sm font-bold transition-colors relative ${activeTab === 'all' ? 'text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
                  >
                     {t('allSongs')}
-                    {activeTab === 'all' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-500 rounded-full"></div>}
+                    {activeTab === 'all' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full"></div>}
                  </button>
                  <button 
                     onClick={() => setActiveTab('liked')}
                     className={`pb-3 text-sm font-bold transition-colors relative ${activeTab === 'liked' ? 'text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
                  >
                     {t('likedSongs')}
-                    {activeTab === 'liked' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-500 rounded-full"></div>}
+                    {activeTab === 'liked' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full"></div>}
                  </button>
                  <button 
                     onClick={() => setActiveTab('playlists')}
                     className={`pb-3 text-sm font-bold transition-colors relative ${activeTab === 'playlists' ? 'text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
                  >
                     {t('playlists')}
-                    {activeTab === 'playlists' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-500 rounded-full"></div>}
+                    {activeTab === 'playlists' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full"></div>}
                  </button>
                  <button 
                     onClick={() => setActiveTab('import')}
                     className={`pb-3 text-sm font-bold transition-colors relative ${activeTab === 'import' ? 'text-zinc-900 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
                  >
                     {t('importAudioTab')}
-                    {activeTab === 'import' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-500 rounded-full"></div>}
+                    {activeTab === 'import' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-pink-500 rounded-full"></div>}
                  </button>
              </div>
              {activeTab === 'all' && <SortMenu order={allOrder} orders={SONG_ORDERS} onChange={setAllOrder} />}
@@ -232,7 +232,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                              </div>
                          </div>
                          <div className="ml-auto mb-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                             <div className="w-14 h-14 rounded-full bg-green-500 flex items-center justify-center shadow-lg hover:scale-105 transition-transform">
+                             <div className="w-14 h-14 rounded-full bg-pink-500 flex items-center justify-center shadow-lg hover:scale-105 transition-transform">
                                 <Play fill="black" className="text-black ml-1" size={28} />
                              </div>
                          </div>

@@ -679,7 +679,7 @@ const SongItem: React.FC<SongItemProps> = ({
                     }
                 }, 0);
             }}
-            className={`group flex min-w-0 items-center gap-2 rounded-lg border p-2 transition-all hover:bg-zinc-100 dark:hover:bg-suno-card sm:gap-4 ${isSelected ? 'bg-zinc-100 dark:bg-suno-card border-zinc-200 dark:border-white/10' : 'border-transparent bg-transparent'} ${song.audioUrl && !song.isGenerating ? 'cursor-grab active:cursor-grabbing' : ''}`}
+            className={`@container/row group flex min-w-0 items-center gap-3 rounded-xl p-2 transition-colors hover:bg-zinc-100 dark:hover:bg-white/[0.04] sm:gap-4 ${isSelected ? 'bg-zinc-100 dark:bg-white/[0.07]' : 'bg-transparent'} ${song.audioUrl && !song.isGenerating ? 'cursor-grab active:cursor-grabbing' : ''}`}
         >
             {isSelectionMode && (
                 <button
@@ -699,8 +699,8 @@ const SongItem: React.FC<SongItemProps> = ({
                 </button>
             )}
 
-            {/* Cover Art - Reduced size */}
-            <div className="relative w-16 h-16 shrink-0 rounded-md bg-zinc-200 dark:bg-zinc-800 overflow-hidden shadow-xs group/image">
+            {/* Cover art, with the length printed on it */}
+            <div className="relative w-16 h-16 shrink-0 rounded-lg bg-zinc-200 dark:bg-zinc-800 overflow-hidden shadow-xs group/image">
                 <SongCover song={song} size="full" className={`w-full h-full transition-opacity ${song.isGenerating ? 'opacity-20 blur-xs' : 'opacity-100'}`} />
 
                 {song.isGenerating ? (
@@ -740,12 +740,17 @@ const SongItem: React.FC<SongItemProps> = ({
                         </div>
                     </div>
                 )}
+                {!isCard(song) && (
+                    <span className="pointer-events-none absolute bottom-1 right-1.5 font-mono text-[11px] font-bold leading-none text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+                        {song.duration}
+                    </span>
+                )}
             </div>
 
             {/* Content */}
-            <div className="flex-1 min-w-0 flex flex-col justify-between py-1">
-                <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+            <div className="flex-1 min-w-0 flex flex-col justify-center">
+                <div className="space-y-0.5">
+                    <div className="flex min-w-0 items-center gap-1.5">
                         {isEditingTitle && isOwner ? (
                             <input
                                 ref={titleInputRef}
@@ -755,11 +760,11 @@ const SongItem: React.FC<SongItemProps> = ({
                                 onBlur={handleSaveTitle}
                                 onKeyDown={handleTitleKeyDown}
                                 onClick={(e) => e.stopPropagation()}
-                                className="font-bold text-lg bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-sm border border-pink-500 focus:outline-hidden text-zinc-900 dark:text-white min-w-0 flex-1"
+                                className="font-medium text-[15px] bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-sm border border-pink-500 focus:outline-hidden text-zinc-900 dark:text-white min-w-0 flex-1"
                             />
                         ) : (
                             <h3
-                                className={`font-bold text-lg truncate ${isCurrent ? 'text-pink-600 dark:text-pink-500' : 'text-zinc-900 dark:text-white'} ${isOwner && !song.isGenerating ? 'cursor-pointer hover:underline' : ''}`}
+                                className={`min-w-0 font-medium text-[15px] leading-5 truncate ${isCurrent ? 'text-pink-600 dark:text-pink-500' : 'text-zinc-900 dark:text-white'} ${isOwner && !song.isGenerating ? 'cursor-pointer hover:underline' : ''}`}
                                 onClick={(e) => {
                                     if (isOwner && !song.isGenerating) {
                                         e.stopPropagation();
@@ -774,7 +779,7 @@ const SongItem: React.FC<SongItemProps> = ({
                             <button
                                 type="button"
                                 onClick={(e) => { e.stopPropagation(); startEditingTitle(); }}
-                                className="shrink-0 rounded-sm p-1 text-zinc-400 opacity-0 transition-opacity hover:text-black focus-visible:opacity-100 group-hover:opacity-100 dark:hover:text-white"
+                                className="hidden shrink-0 rounded-sm p-0.5 text-zinc-400 hover:text-black focus-visible:inline-flex group-hover:inline-flex dark:hover:text-white"
                                 title={t('renameSong')}
                                 aria-label={t('renameSong')}
                             >
@@ -799,7 +804,7 @@ const SongItem: React.FC<SongItemProps> = ({
                             </button>
                         )}
                         <span
-                          className="inline-flex items-center justify-center text-[9px] font-bold text-white bg-linear-to-r from-pink-500 to-purple-500 px-1.5 py-0.5 rounded-xs shadow-xs"
+                          className="inline-flex shrink-0 items-center justify-center rounded-md border border-pink-500/40 bg-pink-500/15 px-1.5 py-px text-[10px] font-medium leading-4 text-pink-600 dark:text-pink-300"
                           title={[
                             `DiT: ${song.ditModel || '?'}`,
                             // Only show LM line when a real local model was used
@@ -819,19 +824,28 @@ const SongItem: React.FC<SongItemProps> = ({
                             </span>
                         )}
                     </div>
-                    <div className="flex h-5 items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    <div className="flex h-5 items-center gap-1.5 text-[13px] text-zinc-600 dark:text-zinc-300">
                         <span>{song.ditModel === 'imported-audio' ? t('importedAudio') : 'YuE2'}</span>
+                        {!isCard(song) && (
+                            <>
+                                <span className="text-zinc-400 dark:text-zinc-600">·</span>
+                                {/* when it was made: how long ago, the exact moment on hover */}
+                                <time dateTime={song.createdAt.toISOString()} title={exactMoment(song.createdAt, language)} className="text-xs text-zinc-500">
+                                    {relativeMoment(song.createdAt, language)}
+                                </time>
+                            </>
+                        )}
                         {song.nativeReplayAvailable && <span title={t('replayAvailable')} className="rounded-sm bg-zinc-200/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide dark:bg-white/10">replay</span>}
                     </div>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-500 line-clamp-2 pt-1 font-medium max-w-2xl">
+                    <p className="truncate text-xs text-zinc-500 max-w-3xl" title={song.style}>
                         {captionSummary(song.style)}
                     </p>
                 </div>
 
                 {/* One slot for the progress and, once the song is made, its
                     actions: the row keeps its height when a card becomes a song. */}
-                {isCard(song) ? (
-                    <div className="flex h-10 items-center pt-2">
+                {isCard(song) && (
+                    <div className="flex h-4 items-center pt-1.5">
                         {song.isGenerating && (
                             <div className="h-1 w-full rounded-full bg-zinc-200/70 dark:bg-white/10 overflow-hidden">
                                 <div
@@ -846,10 +860,14 @@ const SongItem: React.FC<SongItemProps> = ({
                             </div>
                         )}
                     </div>
-                ) : (
-                    <div className="flex h-10 items-center gap-1 pt-2">
+                )}
+            </div>
+
+            {/* The song's actions, in one row at the end of it */}
+            {!isCard(song) && (
+                    <div className="flex shrink-0 items-center gap-0.5">
                         <button
-                            className={`flex items-center gap-1 px-3 py-1.5 rounded-full hover:bg-white/5 transition-colors ${isLiked ? 'text-pink-600 dark:text-pink-500 bg-pink-100 dark:bg-pink-500/10' : 'text-zinc-400 hover:text-black dark:hover:text-white'}`}
+                            className={`flex items-center gap-1 p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/5 transition-colors ${isLiked ? 'text-pink-600 dark:text-pink-500' : 'text-zinc-400 hover:text-black dark:hover:text-white'}`}
                             onClick={(e) => { e.stopPropagation(); onToggleLike(); }}
                             {...named(t('like'))}
                             aria-pressed={isLiked}
@@ -865,7 +883,7 @@ const SongItem: React.FC<SongItemProps> = ({
                             upload a custom image from disk. Only shown for owned songs. */}
                         {isOwner && (
                             <button
-                                className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-400 hover:text-black dark:hover:text-white transition-colors"
+                                className="hidden @2xl/row:block p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-400 hover:text-black dark:hover:text-white transition-colors"
                                 onClick={(e) => { e.stopPropagation(); if (onOpenCoverRegen) onOpenCoverRegen(); }}
                                 {...named(t('coverRegen.openTooltip'))}
                             >
@@ -875,7 +893,7 @@ const SongItem: React.FC<SongItemProps> = ({
 
                         {songActions.exportVideo && song.audioUrl && !song.isGenerating && (
                             <button
-                                className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-400 hover:text-black dark:hover:text-white transition-colors"
+                                className="hidden @2xl/row:block p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-400 hover:text-black dark:hover:text-white transition-colors"
                                 onClick={(e) => { e.stopPropagation(); songActions.exportVideo?.(song); }}
                                 {...named(t('videoExport'))}
                             >
@@ -884,7 +902,7 @@ const SongItem: React.FC<SongItemProps> = ({
                         )}
 
                         <button
-                            className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-400 hover:text-black dark:hover:text-white transition-colors ml-auto"
+                            className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-400 hover:text-black dark:hover:text-white transition-colors"
                             onClick={(e) => { e.stopPropagation(); onAddToPlaylist(); }}
                             {...named(t('addToPlaylist'))}
                         >
@@ -920,11 +938,11 @@ const SongItem: React.FC<SongItemProps> = ({
                             />
                         </div>
                     </div>
-                )}
-            </div>
+            )}
 
-            {/* Timestamp / Status */}
-            <div className="text-xs font-mono text-zinc-500 dark:text-zinc-600 self-start pt-1 text-right">
+            {/* Status of a song still being made, or one that ended without a song */}
+            {isCard(song) && (
+            <div className="text-xs font-mono text-zinc-500 dark:text-zinc-600 self-center text-right">
                 {song.isGenerating ? (
                     <div className="flex flex-col items-end gap-0.5">
                         <span className={song.queuePosition ? 'text-amber-500' : 'text-pink-500'}>
@@ -960,16 +978,9 @@ const SongItem: React.FC<SongItemProps> = ({
                             {t('removeGeneration')}
                         </button>
                     </div>
-                ) : (
-                    <div className="flex flex-col items-end gap-0.5">
-                        <span>{song.duration}</span>
-                        {/* when it was made: how long ago, the exact moment on hover */}
-                        <time dateTime={song.createdAt.toISOString()} title={exactMoment(song.createdAt, language)} className="font-sans text-[10px]">
-                            {relativeMoment(song.createdAt, language)}
-                        </time>
-                    </div>
-                )}
+                ) : null}
             </div>
+            )}
         </div>
         </>
     );

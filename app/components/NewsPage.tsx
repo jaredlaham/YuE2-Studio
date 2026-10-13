@@ -352,7 +352,7 @@ export const NewsPage: React.FC = () => {
   );
 
   return (
-    <div className="flex-1 bg-white dark:bg-black overflow-y-auto p-6 lg:p-10 pb-32 transition-colors duration-300">
+    <div className="flex-1 bg-white dark:bg-suno overflow-y-auto p-6 lg:p-10 pb-32 transition-colors duration-300">
       <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">

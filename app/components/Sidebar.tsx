@@ -113,7 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {isOpen ? (
               <span className="truncate text-[22px] font-extrabold uppercase leading-none tracking-[0.08em] text-zinc-900 dark:text-white">{STUDIO_WORDMARK}</span>
             ) : (
-              <img src="/brand/yue2.png" alt="" className="h-9 w-9 rounded-[10px]" />
+              <img src="/brand/kinetic.png" alt="" className="h-9 w-9 rounded-[10px]" />
             )}
           </button>
           {onToggle && isOpen && (

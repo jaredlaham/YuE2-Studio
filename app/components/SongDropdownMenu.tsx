@@ -26,6 +26,7 @@ import {
     Wand2,
     Piano,
     FileOutput,
+    ListEnd,
 } from 'lucide-react';
 
 /** The one menu of a song. Its actions come from the app through
@@ -305,6 +306,13 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
             <MenuDivider />
 
             {/* Library Actions */}
+            {actions.addToQueue && song.audioUrl && (
+                <MenuItem
+                    icon={<ListEnd size={14} />}
+                    label={t('queueAdd')}
+                    onClick={() => handleAction(() => actions.addToQueue?.(song))}
+                />
+            )}
             <MenuItem
                 icon={<ListPlus size={14} />}
                 label={t('addToPlaylist')}

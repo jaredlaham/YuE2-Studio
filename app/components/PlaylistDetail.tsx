@@ -140,7 +140,7 @@ export const PlaylistDetail: React.FC<PlaylistDetailProps> = ({ playlistId, onBa
                 <button
                     onClick={() => songs.length > 0 && onPlaySong(songs[0], songs)}
                     {...named(t('play'))}
-                    className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-green-500 hover:scale-105 transition-transform flex items-center justify-center text-black shadow-lg"
+                    className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-pink-500 hover:scale-105 transition-transform flex items-center justify-center text-white shadow-lg"
                 >
                     <Play size={24} fill="currentColor" className="ml-1" />
                 </button>

@@ -18,6 +18,8 @@ export interface SongActions {
   addToPlaylist?: (song: Song) => void;
   remove?: (song: Song) => void;
   update?: (song: Song) => void;
+  /** Puts the song at the end of the play queue. */
+  addToQueue?: (song: Song) => void;
 }
 
 const SongActionsContext = createContext<SongActions>({});

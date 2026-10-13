@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { useKaraokeStatus } from '../services/studioQueries';
 import { TRACK_ARTIST } from '../services/studio';
 import { Song } from '../types';
-import { Play, Pause, SkipBack, SkipForward, Repeat, Shuffle, Download, Heart, MoreVertical, Volume2, VolumeX, Maximize2, Repeat1, CircleStop, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Repeat, Shuffle, Download, Heart, MoreVertical, Volume2, VolumeX, Maximize2, Repeat1, CircleStop, ChevronDown, ChevronUp, ListMusic } from 'lucide-react';
 import { useResponsive } from '../context/ResponsiveContext';
 import { useI18n } from '../context/I18nContext';
 import { SongDropdownMenu } from './SongDropdownMenu';
@@ -34,6 +34,9 @@ interface PlayerProps {
     isLiked: boolean;
     onToggleLike: () => void;
     onPlayFirst?: () => void;
+    /** The queue panel beside the page: whether it is open, and its switch. */
+    queueOpen?: boolean;
+    onToggleQueue?: () => void;
 }
 
 export const Player: React.FC<PlayerProps> = ({
@@ -57,6 +60,8 @@ export const Player: React.FC<PlayerProps> = ({
     isLiked,
     onToggleLike,
     onPlayFirst,
+    queueOpen = false,
+    onToggleQueue,
 }) => {
     const { isMobile } = useResponsive();
     const { t } = useI18n();
@@ -588,52 +593,30 @@ export const Player: React.FC<PlayerProps> = ({
         );
     }
 
+    // The bar floats over the bottom of the window as a rounded card: the song on
+    // the left, the transport with its progress line in the middle, the rest on the right.
     return (
-        <div className="h-20 lg:h-24 bg-white dark:bg-black/95 backdrop-blur-sm border-t border-zinc-200 dark:border-white/10 flex flex-col z-50 transition-colors duration-300 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] dark:shadow-none">
-
-            {/* Progress Bar */}
-            <div
-                ref={progressBarRef}
-                className="w-full h-1 lg:h-1.5 bg-zinc-200 dark:bg-zinc-800 cursor-pointer group relative"
-                onClick={(e) => handleSeekInteraction(e, progressBarRef)}
-            >
-                <div
-                    className="h-full bg-zinc-900 dark:bg-white relative group-hover:bg-pink-600 dark:group-hover:bg-pink-500 transition-colors"
-                    style={{ width: `${progressPercent}%` }}
-                >
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-zinc-900 dark:bg-white group-hover:bg-pink-600 dark:group-hover:bg-pink-500 rounded-full shadow-lg -mr-2 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-                {/* Hit area for easier clicking */}
-                <div className="absolute top-1/2 -translate-y-1/2 w-full h-4 -z-10"></div>
-            </div>
-
-            <div className="flex-1 flex items-center justify-between px-2 sm:px-4 lg:px-6 gap-2 sm:gap-4">
+        <div className="z-50 shrink-0 px-2 pb-2 pt-1 sm:px-3 sm:pb-3 bg-white dark:bg-suno transition-colors duration-300">
+        <div className="flex h-[72px] items-center justify-between gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-3 shadow-[0_8px_30px_rgba(0,0,0,0.12)] sm:gap-4 lg:px-4 dark:border-white/[0.06] dark:bg-suno-card dark:shadow-[0_8px_30px_rgba(0,0,0,0.5)]">
 
                 {/* Song Info */}
-                <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 max-w-[30%] lg:max-w-[33%]">
-                    <div className="w-10 h-10 lg:w-12 lg:h-12 rounded-sm bg-zinc-200 dark:bg-zinc-800 overflow-hidden shadow-xs shrink-0">
+                <div className="flex items-center gap-3 min-w-0 flex-1 max-w-[30%] lg:max-w-[33%]">
+                    <div className="w-12 h-12 rounded-lg bg-zinc-200 dark:bg-zinc-800 overflow-hidden shadow-xs shrink-0">
                         <SongCover song={currentSong} size="full" className="w-full h-full" />
                     </div>
                     <div className="overflow-hidden min-w-0">
-                        <h4 className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-white truncate">
+                        <h4 className="text-sm font-medium text-zinc-900 dark:text-white truncate">
                             {currentSong.title}
                         </h4>
-                        <p className={`text-[10px] sm:text-xs truncate ${karaokeLine ? 'font-medium text-zinc-800 dark:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400'}`}>
+                        <p className={`text-xs truncate ${karaokeLine ? 'font-medium text-zinc-800 dark:text-zinc-100' : 'text-zinc-500 dark:text-zinc-400'}`}>
                             {karaokeLine || captionSummary(currentSong.style || '')}
                         </p>
                     </div>
-                    <button
-                        onClick={onToggleLike}
-                        {...named(t('like'))} aria-pressed={isLiked}
-                        className={`ml-1 sm:ml-2 transition-colors shrink-0 hidden sm:block ${isLiked ? 'text-pink-600 dark:text-pink-500' : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-white'}`}
-                    >
-                        <Heart size={18} fill={isLiked ? "currentColor" : "none"} />
-                    </button>
                 </div>
 
-                {/* Controls */}
-                <div className="flex flex-col items-center justify-center shrink-0">
-                    <div className="flex items-center gap-2 sm:gap-4 lg:gap-6">
+                {/* Controls, with the progress line under them */}
+                <div className="flex w-full max-w-[520px] flex-1 flex-col items-center justify-center gap-1.5">
+                    <div className="flex items-center gap-3 sm:gap-5">
                         <button
                             onClick={onToggleShuffle}
                             {...named(t('shuffle'))} aria-pressed={isShuffle}
@@ -646,21 +629,21 @@ export const Player: React.FC<PlayerProps> = ({
                             {...named(t('previous'))}
                             className="text-zinc-700 dark:text-zinc-300 hover:text-black dark:hover:text-white transition-colors"
                         >
-                            <SkipBack size={18} className="sm:w-[22px] sm:h-[22px]" fill="currentColor" />
+                            <SkipBack size={18} fill="currentColor" />
                         </button>
                         <button
                             onClick={onTogglePlay}
                             {...named(isPlaying ? t('pause') : t('play'))}
-                            className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-black flex items-center justify-center hover:scale-105 transition-transform shadow-lg"
+                            className="w-9 h-9 rounded-full bg-zinc-900 dark:bg-white text-white dark:text-black flex items-center justify-center hover:scale-105 transition-transform shadow-lg"
                         >
-                            {isPlaying ? <Pause size={18} className="sm:w-5 sm:h-5" fill="currentColor" /> : <Play size={18} className="sm:w-5 sm:h-5 ml-0.5" fill="currentColor" />}
+                            {isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} className="ml-0.5" fill="currentColor" />}
                         </button>
                         <button
                             onClick={onNext}
                             {...named(t('next'))}
                             className="text-zinc-700 dark:text-zinc-300 hover:text-black dark:hover:text-white transition-colors"
                         >
-                            <SkipForward size={18} className="sm:w-[22px] sm:h-[22px]" fill="currentColor" />
+                            <SkipForward size={18} fill="currentColor" />
                         </button>
                         <button
                             onClick={onToggleRepeat}
@@ -671,13 +654,44 @@ export const Player: React.FC<PlayerProps> = ({
                             {repeatMode !== 'none' && <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-1 h-1 bg-current rounded-full"></div>}
                         </button>
                     </div>
+                    <div className="hidden w-full items-center gap-2 md:flex">
+                        <span className="w-9 shrink-0 text-right font-mono text-[10px] text-zinc-500">{formatTime(currentTime)}</span>
+                        <div
+                            ref={progressBarRef}
+                            className="group relative h-1 flex-1 cursor-pointer rounded-full bg-zinc-300 dark:bg-white/15"
+                            onClick={(e) => handleSeekInteraction(e, progressBarRef)}
+                        >
+                            <div
+                                className="relative h-full rounded-full bg-zinc-900 dark:bg-white"
+                                style={{ width: `${progressPercent}%` }}
+                            >
+                                <div className="absolute right-0 top-1/2 h-3 w-3 -translate-y-1/2 translate-x-1/2 rounded-full bg-zinc-900 shadow-lg opacity-0 transition-opacity group-hover:opacity-100 dark:bg-white" />
+                            </div>
+                            {/* Hit area for easier clicking */}
+                            <div className="absolute top-1/2 -translate-y-1/2 w-full h-4"></div>
+                        </div>
+                        <span className="w-9 shrink-0 font-mono text-[10px] text-zinc-500">{formatTime(duration || 0)}</span>
+                    </div>
                 </div>
 
                 {/* Volume & Extras */}
                 <div className="flex items-center justify-end gap-1 sm:gap-2 lg:gap-3 min-w-0 flex-1 max-w-[30%] lg:max-w-[33%] text-zinc-500 dark:text-zinc-400">
-                    <span className="text-[10px] sm:text-xs font-mono text-right text-zinc-600 dark:text-zinc-400 hidden md:block">
-                        {formatTime(currentTime)} / {formatTime(duration || 0)}
-                    </span>
+                    {onToggleQueue && (
+                        <button
+                            onClick={onToggleQueue}
+                            {...named(t('queue'))} aria-pressed={queueOpen}
+                            className={`p-1.5 lg:p-2 rounded-full transition-colors hover:bg-zinc-100 dark:hover:bg-white/10 ${queueOpen ? 'text-pink-600 dark:text-pink-500' : ''}`}
+                        >
+                            <ListMusic size={18} />
+                        </button>
+                    )}
+                    <button
+                        onClick={onToggleLike}
+                        {...named(t('like'))} aria-pressed={isLiked}
+                        className={`p-1.5 lg:p-2 rounded-full transition-colors hover:bg-zinc-100 dark:hover:bg-white/10 ${isLiked ? 'text-pink-600 dark:text-pink-500' : ''}`}
+                    >
+                        <Heart size={18} fill={isLiked ? "currentColor" : "none"} />
+                    </button>
 
                     {/* Playback Speed */}
                     <div className="relative group hidden lg:block" ref={speedMenuRef}>

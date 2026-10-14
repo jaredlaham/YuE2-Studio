@@ -36,6 +36,8 @@ pub struct TrackPlan {
     pub color: u32,
     /// What the track holds at bar 1, if anything.
     pub clip: Option<Clip>,
+    /// Live's track activator: an inactive track is in the set and silent until switched on.
+    pub active: bool,
 }
 
 /// A clip at the start of the arrangement.
@@ -144,6 +146,18 @@ fn copy_track(block: &str, kind: &str, track_id: u64, next: &mut u64, plan: &Tra
     let color_at = text[name_start..].find("<Color Value=\"").map(|at| at + name_start).ok_or_else(|| anyhow!("a {kind} without a colour"))?;
     let color_end = text[color_at..].find("/>").map(|at| at + color_at + 2).ok_or_else(|| anyhow!("a broken colour"))?;
     text.replace_range(color_at..color_end, &format!(r#"<Color Value="{}" />"#, plan.color.min(69)));
+    if !plan.active {
+        // the activator is the mixer's Speaker; the template saves it on
+        let speaker = text.find("<Speaker>").ok_or_else(|| anyhow!("a {kind} without a track activator"))?;
+        let mut rest = text[speaker..].to_string();
+        let manual = rest.find("<Manual Value=\"true\" />").ok_or_else(|| anyhow!("the {kind}'s activator is not on in the template"))?;
+        let close = rest.find("</Speaker>").ok_or_else(|| anyhow!("a broken track activator"))?;
+        if manual > close {
+            bail!("the {kind}'s activator has no value");
+        }
+        rest.replace_range(manual..manual + "<Manual Value=\"true\" />".len(), "<Manual Value=\"false\" />");
+        text.replace_range(speaker.., &rest);
+    }
     if let Some(clip) = &plan.clip {
         match (kind, clip) {
             ("MidiTrack", Clip::Midi(_)) | ("AudioTrack", Clip::Audio(_)) => {}
@@ -355,9 +369,33 @@ mod tests {
         SetPlan {
             bpm: 92.0,
             meter: (6, 8),
-            midi: vec![TrackPlan { name: "Lead (from score)".into(), color: 14, clip: None }, TrackPlan { name: "Chords (from score)".into(), color: 15, clip: None }],
-            audio: ["Mix", "Drums (separated)", "Bass (separated)"].iter().map(|name| TrackPlan { name: (*name).into(), color: 3, clip: None }).collect(),
+            midi: vec![TrackPlan { name: "Lead (from score)".into(), color: 14, clip: None, active: true }, TrackPlan { name: "Chords (from score)".into(), color: 15, clip: None, active: true }],
+            audio: ["Mix", "Drums (separated)", "Bass (separated)"].iter().map(|name| TrackPlan { name: (*name).into(), color: 3, clip: None, active: true }).collect(),
         }
+    }
+
+    #[test]
+    fn an_inactive_track_is_in_the_set_with_its_activator_off() {
+        let mut plan = plan();
+        plan.audio[1].active = false;
+        let built = build_xml(&gunzip(LIVE_12_TEMPLATE).unwrap(), &plan).unwrap();
+        let document = roxmltree::Document::parse(&built).unwrap();
+        let activators: Vec<(String, String)> = document
+            .descendants()
+            .filter(|node| node.has_tag_name("AudioTrack") || node.has_tag_name("MidiTrack"))
+            .map(|track| {
+                let name = track.descendants().find(|node| node.has_tag_name("UserName")).unwrap().attribute("Value").unwrap().to_string();
+                let speaker = track.descendants().find(|node| node.has_tag_name("Speaker")).unwrap();
+                (name, value(speaker, "Manual").to_string())
+            })
+            .collect();
+        assert_eq!(activators, [
+            ("Lead (from score)".to_string(), "true".to_string()),
+            ("Chords (from score)".to_string(), "true".to_string()),
+            ("Mix".to_string(), "true".to_string()),
+            ("Drums (separated)".to_string(), "false".to_string()),
+            ("Bass (separated)".to_string(), "true".to_string()),
+        ]);
     }
 
     fn with_clips() -> SetPlan {

@@ -7,7 +7,7 @@ seed, four renders, then measurements and a listening sheet. The audit that moti
 | Output | What it is | Made by |
 |---|---|---|
 | **A** | Official YuE2 (PyTorch, BF16, YuE2-Vae, release defaults, no length cap) | `run_official.py` |
-| **B** | Kinetic Studio's own path: the app's API, the Create page's defaults (130 s ceiling) | `run_kinetic.py studio` |
+| **B** | Kinetic Studio's own path: the app's API, the Create page's audited defaults (the old 130 s ceiling; Auto is now the default) | `run_kinetic.py studio` |
 | **B-full** | The same, with no length cap (`--duration 0`) | `run_kinetic.py studio --duration 0` |
 | **B-replay** | A's own score and semantic tokens re-rendered by the app's engine (yue2.cpp, Q8_0, Metal) | `run_kinetic.py replay` |
 | **C** | B's library song exported as an Ableton project and rendered by Live | `check_ableton.py` |
@@ -61,8 +61,9 @@ Everything below writes under `runs/`. Use a fresh folder per run.
        --labels A B-replay B B-full --reference A --out runs/report-t1
    ```
 
-5. **C, Ableton**: in Kinetic Studio, Export → Ableton project for the B-t1 song **before**
-   separating stems (with stems the mix is left off the set). Open the `.als` in Live 12, leave
+5. **C, Ableton**: in Kinetic Studio, Export → Ableton project for the B-t1 song. The master
+   plays on an active track and any stems sit on tracks that are switched off, so Live's render
+   is the master alone. Open the `.als` in Live 12, leave
    everything as it is, File → Export Audio/Video: Rendered Track Main, normalise off, dither
    off, 48 kHz, 32-bit float WAV. Then:
 
@@ -71,6 +72,17 @@ Everything below writes under `runs/`. Use a fresh folder per run.
    ```
 
 Repeat 1–5 with `t2-analog-electronica.json`.
+
+## Speed benchmark
+
+`bench_speed.py` times a 60-second and a full-length instrumental in Studio Quality, re-renders
+each from its own tokens with the faster acoustic settings, compares their sound with the
+Studio Quality master, and times an Ableton export cold and warm. See
+`docs/kinetic-studio/SPEED.md`.
+
+```bash
+python3 bench_speed.py --output runs/speed-1 --extended
+```
 
 ## Reading the numbers
 

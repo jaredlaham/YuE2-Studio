@@ -63,20 +63,21 @@ at 5:12 (312 s) and took 33.6 minutes:
 
 The acoustic stage is where the time goes. Each pass attends over the whole
 song (7,805 frames plus the 2,834-token prompt and score), so its cost grows
-faster than the song's length: a song half as long takes much less than half
-the time there. What shortens it, in Create → Quality:
+faster than the song's length.
 
-- **Solver: AB2.** 33 network passes instead of 64 for 32 steps, so about half
-  the acoustic time. The engine's authors measured its sound against midpoint
-  (mel spectra correlated at 0.9996 on a 122 s song at 16 steps).
-- **Fewer flow-matching steps**, for example 16 instead of 32: half again. The
-  engine's own comparison above was run at 16 steps; how it sounds against 32
-  has not been checked on this build.
-- **A shorter Max duration.** The default ceiling is 130 s; the model ends a
-  song when it judges it finished, up to 6:00.
+Create → Quality has two modes:
 
-Estimated, not measured: the same 5:12 song with AB2 and 16 steps would spend
-about 7.5 minutes in the acoustic stage and about 12.5 minutes in all.
+- **Studio Quality** (default): the reference render, 32 midpoint steps (64
+  network passes), length Auto (the model ends the song, up to 6:00).
+- **Fast Draft**: the AB2 solver at the same 32 steps, 33 passes, so about
+  half the acoustic time. Not yet listening-tested against Studio Quality on
+  this build. Re-render a draft you like in Studio Quality from its tokens.
+
+Fewer steps (16) are not offered in either mode: they have never been compared
+with 32 on this build. Stems, MIDI, mastering and Ableton export never run at
+Create. Each song's details have a Performance panel with every stage's time.
+`SPEED.md` has the full profile, the findings and the benchmark
+(`scripts/quality/bench_speed.py`) that measures both modes on your Mac.
 
 ## Differences from YuE2 Studio
 

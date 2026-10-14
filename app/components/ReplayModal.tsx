@@ -3,6 +3,7 @@ import { AlertTriangle, Loader2, Repeat, X } from 'lucide-react';
 import { Song } from '../types';
 import { useI18n } from '../context/I18nContext';
 import { parseDuration } from '../services/nativeLibrary';
+import { MODE_LABEL, REFERENCE_STEPS, modeOf, renderModeOf } from '../services/qualityModes';
 
 /**
  * Deterministic re-render.
@@ -31,7 +32,11 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ song, clientRef, onClo
   const numberOr = (key: string, fallback: number) =>
     typeof settings[key] === 'number' ? (settings[key] as number) : fallback;
 
-  const [steps, setSteps] = useState<number>(numberOr('steps', 32));
+  const rendered = renderModeOf(settings);
+  // a draft re-renders in Studio Quality unless asked otherwise: that is what keeping a draft is for
+  const [steps, setSteps] = useState<number>(rendered === 'draft' ? REFERENCE_STEPS : numberOr('steps', REFERENCE_STEPS));
+  const [solver, setSolver] = useState<'midpoint' | 'ab2'>(rendered === 'draft' || settings.solver !== 'ab2' ? 'midpoint' : 'ab2');
+  const mode = modeOf(String(steps), solver);
   const [variations, setVariations] = useState<number>(1);
   // Empty keeps the track's own sound seed exactly as the service stored it:
   // the engine draws 64-bit seeds, which a JavaScript number cannot hold.
@@ -61,6 +66,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ song, clientRef, onClo
           song_id: song.id,
           client_ref: clientRef,
           steps,
+          solver,
           seed: parsedSeed,
           synth_batch_size: variations,
           output_format: format,
@@ -94,11 +100,27 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ song, clientRef, onClo
         <div className="space-y-3 p-5">
           <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{song.title}</p>
           <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">{t('replayHint')}</p>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500" data-testid="replay-mode">
+            <span>Made as {MODE_LABEL[rendered]}. This render: <strong className="text-zinc-700 dark:text-zinc-200">{MODE_LABEL[mode]}</strong>.</span>
+            {mode !== 'studio' && (
+              <button type="button" onClick={() => { setSteps(REFERENCE_STEPS); setSolver('midpoint'); }} className="rounded-md border border-zinc-200 px-2 py-0.5 font-semibold text-zinc-700 hover:border-pink-300 dark:border-white/10 dark:text-zinc-200">
+                Use Studio Quality
+              </button>
+            )}
+            <span className="w-full leading-4">The same composition and noise seed, rendered again: not a new song, and not bit-identical to a fresh Studio Quality generation of the prompt.</span>
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               <span className="mb-1.5 block">{t('flowSteps')}</span>
               <input type="number" min={1} max={200} value={steps} onChange={event => setSteps(Math.max(1, Number(event.target.value) || 1))} className={CONTROL} />
+            </label>
+            <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              <span className="mb-1.5 block">Solver</span>
+              <select value={solver} onChange={event => setSolver(event.target.value === 'ab2' ? 'ab2' : 'midpoint')} className={CONTROL}>
+                <option value="midpoint">Midpoint (reference)</option>
+                <option value="ab2">AB2 (about half the passes)</option>
+              </select>
             </label>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               <span className="mb-1.5 block">{t('variationsPerRender')}</span>

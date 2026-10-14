@@ -52,6 +52,7 @@ mod library;
 mod engine_result;
 mod progress;
 mod engine_log;
+mod kinetic_perf;
 mod harmony;
 
 use std::{collections::HashMap, env, fs, net::SocketAddr, path::PathBuf, sync::Arc};
@@ -1061,6 +1062,8 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/kinetic/midi/{id}/{part}", get(kinetic_midi::file))
         .route("/v1/kinetic/ableton", post(kinetic_ableton::start))
         .route("/v1/kinetic/ableton/{id}/file", get(kinetic_ableton::file))
+        .route("/v1/kinetic/ableton/jobs", post(kinetic_ableton::start_job))
+        .route("/v1/kinetic/ableton/jobs/{id}", get(kinetic_ableton::job_status))
         .route("/v1/kinetic/mcp/folders", get(mcp_guard::get_folders).put(mcp_guard::put_folders))
         .route("/v1/training/datasets/{id}/items/{item}/files", get(dataset_song_files))
         .route("/v1/training/prepare/cancel", post(prepare::cancel))
@@ -2947,6 +2950,58 @@ async fn read_stem_audio(
     Ok(serve_audio_file(&path, request).await)
 }
 
+/// What separating a song made: its stems, whether the card ran the model, and the sum-to-mix report.
+type Separated = anyhow::Result<(Vec<String>, bool, stem_render::StemReport)>;
+
+/// Separates a song into its stems beside it and adds them to the library,
+/// reporting progress on `state.separation_run`. Blocking: call it off the
+/// async threads. The stem mixer and the Ableton export share it, so a song is
+/// separated once and both find the same files.
+fn separate_into_stems(
+    background: &AppState,
+    song_id: &str,
+    audio_path: &std::path::Path,
+    model: &std::path::Path,
+    card: Option<lyrics_sync::OnnxCard>,
+    overlap: f64,
+    wanted: &[String],
+) -> (Separated, Option<anyhow::Result<(Vec<String>, Option<String>)>>) {
+    let outcome = (|| -> Separated {
+        // the mix at its own rate is what the stems are lined up against; the model hears it at 44.1 kHz
+        let mix = audio_pcm::decode_stereo(audio_path)?;
+        let model_rate = if mix.rate == separation::SAMPLE_RATE { mix.clone() } else { mix.resampled(separation::SAMPLE_RATE)? };
+        let audio: Vec<f32> = model_rate.left.iter().zip(&model_rate.right).flat_map(|(left, right)| [*left, *right]).collect();
+        drop(model_rate);
+        let handle = tokio::runtime::Handle::current();
+        let separated = separation::separate(model, &audio, separation::STEMS.len(), overlap, card, |fraction| {
+            let state = background.clone();
+            handle.spawn(async move {
+                if let Some(run) = state.separation_run.write().await.as_mut() {
+                    run.progress = fraction;
+                }
+            });
+        })?;
+        let ran_on_gpu = separated.used_gpu;
+        // the six together account for the mix; a partial set that is kept does not
+        let all_stems = separated.stems.len() == separation::STEMS.len() && separation::STEMS.iter().all(|stem| wanted.iter().any(|name| name == stem));
+        let fitted = stem_render::fit_to_mix(separated.stems, mix.rate, mix.frames())?;
+        let report = stem_render::report(&fitted, &mix, all_stems);
+        let mut written = Vec::new();
+        for stem in fitted {
+            if !wanted.iter().any(|name| name == stem.name) {
+                continue;
+            }
+            let path = stem_path(background, song_id, stem.name);
+            stem_render::write(&path, &stem.audio, stem_render::seed_for(song_id, stem.name))?;
+            written.push(stem.name.to_string());
+        }
+        Ok((written, ran_on_gpu, report))
+    })();
+    // still on this thread: the stems are hundreds of megabytes to copy
+    let library = outcome.as_ref().ok().map(|(stems, _, report)| stems_into_library(background, song_id, stems, overlap, Some(report)));
+    (outcome, library)
+}
+
 /// Separates one track into stems, in the background, reporting progress.
 async fn start_separation(
     State(state): State<AppState>,
@@ -2989,40 +3044,7 @@ async fn start_separation(
     let background = state.clone();
     let song_id = id.clone();
     tokio::task::spawn_blocking(move || {
-        let outcome = (|| -> anyhow::Result<(Vec<String>, bool, stem_render::StemReport)> {
-            // the mix at its own rate is what the stems are lined up against; the model hears it at 44.1 kHz
-            let mix = audio_pcm::decode_stereo(&audio_path)?;
-            let model_rate = if mix.rate == separation::SAMPLE_RATE { mix.clone() } else { mix.resampled(separation::SAMPLE_RATE)? };
-            let audio: Vec<f32> = model_rate.left.iter().zip(&model_rate.right).flat_map(|(left, right)| [*left, *right]).collect();
-            drop(model_rate);
-            let handle = tokio::runtime::Handle::current();
-            let separated = separation::separate(&model, &audio, separation::STEMS.len(), overlap, card, |fraction| {
-                let state = background.clone();
-                handle.spawn(async move {
-                    if let Some(run) = state.separation_run.write().await.as_mut() {
-                        run.progress = fraction;
-                    }
-                });
-            })?;
-            let ran_on_gpu = separated.used_gpu;
-            // the six together account for the mix; a partial set that is kept does not
-            let all_stems = separated.stems.len() == separation::STEMS.len() && separation::STEMS.iter().all(|stem| wanted.iter().any(|name| name == stem));
-            let fitted = stem_render::fit_to_mix(separated.stems, mix.rate, mix.frames())?;
-            let report = stem_render::report(&fitted, &mix, all_stems);
-            let mut written = Vec::new();
-            for stem in fitted {
-                if !wanted.iter().any(|name| name == stem.name) {
-                    continue;
-                }
-                let path = stem_path(&background, &song_id, stem.name);
-                stem_render::write(&path, &stem.audio, stem_render::seed_for(&song_id, stem.name))?;
-                written.push(stem.name.to_string());
-            }
-            Ok((written, ran_on_gpu, report))
-        })();
-        // still on this thread: the stems are hundreds of megabytes to copy
-        let library = outcome.as_ref().ok().map(|(stems, _, report)| stems_into_library(&background, &song_id, stems, overlap, Some(report)));
-
+        let (outcome, library) = separate_into_stems(&background, &song_id, &audio_path, &model, card, overlap, &wanted);
         let handle = tokio::runtime::Handle::current();
         handle.spawn(async move {
             if let Some(run) = background.separation_run.write().await.as_mut() {
@@ -7246,7 +7268,7 @@ async fn submit_replay_job(state: AppState, request: ReplayMusicJobRequest, atte
     };
     if let Some(song_id) = &request.song_id {
         if let Some(original) = state.library.get_song(song_id).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))? {
-            job.derived = Some(derivation(&original, "replay", serde_json::json!({ "steps": request.steps, "seed": request.seed, "synth_batch_size": request.synth_batch_size, "output_format": request.output_format, "mp3_bitrate": request.mp3_bitrate, "extend_seconds": request.extend_seconds })));
+            job.derived = Some(derivation(&original, "replay", serde_json::json!({ "steps": request.steps, "solver": request.solver, "seed": request.seed, "synth_batch_size": request.synth_batch_size, "output_format": request.output_format, "mp3_bitrate": request.mp3_bitrate, "extend_seconds": request.extend_seconds })));
         }
     }
     state.jobs.write().await.insert(job.id.clone(), job.clone());
@@ -7554,6 +7576,9 @@ async fn follow_job(state: &AppState, job_id: &str) {
     let (state, job_id) = (state.clone(), job_id.to_string());
     {
         let mut unreachable = 0u32;
+        // when the engine took the job, and the machine's memory while it ran
+        let mut timing = JobTiming::default();
+        let mut sampler: Option<kinetic_perf::ResourceSampler> = None;
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
             let Some(existing) = state.jobs.read().await.get(&job_id).cloned() else { return };
@@ -7584,8 +7609,17 @@ async fn follow_job(state: &AppState, job_id: &str) {
                     continue;
                 }
             };
+            if remote.status == "running" {
+                timing.started_at.get_or_insert_with(unix_millis);
+                let sampler = sampler.get_or_insert_with(|| kinetic_perf::ResourceSampler::new(remote_engine::saved_url().is_some()));
+                if !sampler.is_remote() {
+                    sampler.sample();
+                }
+            }
             if remote.status == "done" {
-                let imported = import_completed_result(&state, &existing, &job_id).await;
+                timing.engine_done_at = unix_millis();
+                timing.peaks = sampler.take().map(kinetic_perf::ResourceSampler::finish);
+                let imported = import_completed_result(&state, &existing, &job_id, &timing).await;
                 let mut jobs = state.jobs.write().await;
                 let Some(job) = jobs.get_mut(&job_id) else { return };
                 if matches!(job.status, MusicJobStatus::Cancelled) { return; }
@@ -7619,7 +7653,17 @@ async fn follow_job(state: &AppState, job_id: &str) {
     }
 }
 
-async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str) -> anyhow::Result<Vec<CompletedSong>> {
+/// When a job's stages happened, as the studio saw them.
+#[derive(Debug, Default)]
+struct JobTiming {
+    started_at: Option<u64>,
+    engine_done_at: u64,
+    peaks: Option<kinetic_perf::ResourcePeaks>,
+}
+
+async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str, timing: &JobTiming) -> anyhow::Result<Vec<CompletedSong>> {
+    let import_started = std::time::Instant::now();
+    let engine_run = state.engine_log.run(job_id);
     let result = state.music_server.result(job_id).await?;
     let tracks = engine_result::parse_multipart_result(&result.content_type, &result.body)?;
     let profile_id = state.selected_profile_id.read().await.clone();
@@ -7770,6 +7814,23 @@ async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str)
             "job_id": job_id,
             "vocals_extraction": vocals_used_gpu.map(|used_gpu| serde_json::json!({ "used_gpu": used_gpu, "model": separation::MODEL.id })),
         });
+        let mut metadata = metadata;
+        // the engine stopped this song at its budget rather than the model ending it
+        if engine_run.as_ref().is_some_and(|run| run.truncated) {
+            metadata["truncated"] = Value::Bool(true);
+        }
+        metadata["performance"] = kinetic_perf::record(
+            engine_run.as_ref(),
+            timing.peaks.as_ref(),
+            job.submitted_at,
+            timing.started_at,
+            timing.engine_done_at.max(job.submitted_at),
+            unix_millis(),
+            import_started.elapsed().as_secs_f64() * 1000.0,
+            &generation_settings,
+            profile_id.as_deref(),
+            metadata["duration_seconds"].as_f64(),
+        );
         // Several tracks from one request share its name; number them so the
         // library can tell the takes apart.
         let title = match (&job.title, count) {

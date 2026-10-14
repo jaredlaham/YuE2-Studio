@@ -210,8 +210,11 @@ export const KineticPromptPanel: React.FC<{
     run.current = controller;
     try {
       const planned = await composeScore({ style: compiled.style, lyrics: compiled.lyrics, cot: compiled.cot }, controller.signal);
-      const moved = await instrumentalScore(planned);
-      if (failed(moved)) { setError(moved.error); return; }
+      const transferred = await instrumentalScore(planned);
+      // a plan with no sung notes is instrumental already: it is used as it is
+      const already = failed(transferred) && transferred.error.includes('instrumental already');
+      if (failed(transferred) && !already) { setError(transferred.error); return; }
+      const moved = failed(transferred) ? { abc: planned, moved: 0 } : transferred;
       const marked = await markScore(moved.abc, compiled.style, compiled.lyrics, compiled.cot, false);
       if (failed(marked)) { setError(marked.error); return; }
       if (controller.signal.aborted) return;
@@ -387,19 +390,30 @@ export const KineticPromptPanel: React.FC<{
               <button type="button" className={PRIMARY} disabled={blocked || busy !== null || !compiled.chordBed} onClick={() => void writeLockedScore()}>
                 {busy === 'bed' && <Loader2 size={13} className="animate-spin" />}Use in form with a locked score
               </button>
+            ) : instrumental ? (
+              // m-a-p's instrumental workflow is the default: a score planned and its sung notes moved to the instrument
+              <>
+                <button
+                  type="button"
+                  className={PRIMARY}
+                  disabled={blocked || busy !== null || !engineReady}
+                  onClick={() => void composeInstrumental()}
+                  title={engineReady ? 'Plan a score from the style and sections, then move any sung notes to the instrument voice (the official instrumental workflow)' : 'Install and start the music engine first'}
+                >
+                  {busy === 'compose' && <Loader2 size={13} className="animate-spin" />}Compose an instrumental score
+                </button>
+                <button
+                  type="button"
+                  className={BUTTON}
+                  disabled={blocked || busy !== null}
+                  onClick={useInForm}
+                  title="Skips the official instrumental step: the model plans a melody for a voice the track will not have"
+                >
+                  Use in form without a score
+                </button>
+              </>
             ) : (
               <button type="button" className={PRIMARY} disabled={blocked || busy !== null} onClick={useInForm}>Use in form</button>
-            )}
-            {instrumental && !prompt.lockToScore && (
-              <button
-                type="button"
-                className={BUTTON}
-                disabled={blocked || busy !== null || !engineReady}
-                onClick={() => void composeInstrumental()}
-                title={engineReady ? 'Plan a score from the style and sections, then move any sung notes to the instrument voice' : 'Install and start the music engine first'}
-              >
-                {busy === 'compose' && <Loader2 size={13} className="animate-spin" />}Compose an instrumental score
-              </button>
             )}
             {busy === 'compose' && (
               <span className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500">

@@ -16,6 +16,7 @@ use tokio::sync::watch;
 use tokio_stream::wrappers::WatchStream;
 use tokio_stream::{Stream, StreamExt};
 
+use crate::kinetic_perf::{EngineRun, RunTracker};
 use crate::progress::{self, Progress};
 
 /// As many lines as yue-server keeps in its ring (`LOG_RING_SIZE`).
@@ -31,12 +32,14 @@ pub struct EngineLog {
     /// `None` while there is no subscription: the engine is starting or down.
     lines: Arc<Mutex<Option<VecDeque<String>>>>,
     progress: Arc<watch::Sender<Option<Progress>>>,
+    /// Each job's stage timings as the engine reports them.
+    runs: Arc<Mutex<RunTracker>>,
 }
 
 impl EngineLog {
     /// Follows the engine log at `url` from now on.
     pub fn follow(http: reqwest::Client, url: String) -> Self {
-        let log = Self { lines: Arc::default(), progress: Arc::new(watch::Sender::new(None)) };
+        let log = Self { lines: Arc::default(), progress: Arc::new(watch::Sender::new(None)), runs: Arc::default() };
         tokio::spawn(log.clone().subscribe(http, url));
         log
     }
@@ -44,6 +47,11 @@ impl EngineLog {
     /// The engine's recent lines, or `None` while there is no subscription.
     pub fn lines(&self) -> Option<Vec<String>> {
         self.lines.lock().expect("engine log").as_ref().map(|lines| lines.iter().cloned().collect())
+    }
+
+    /// What the engine's log said about one job: its stages and their times.
+    pub fn run(&self, job_id: &str) -> Option<EngineRun> {
+        self.runs.lock().expect("engine runs").run(job_id)
     }
 
     /// The running job's progress as server-sent events: the current value
@@ -71,6 +79,7 @@ impl EngineLog {
 
     fn reset(&self, lines: Option<VecDeque<String>>) {
         *self.lines.lock().expect("engine log") = lines;
+        self.runs.lock().expect("engine runs").reset();
         self.progress.send_replace(None);
     }
 
@@ -84,6 +93,7 @@ impl EngineLog {
             }
             lines.push_back(line.to_owned());
         }
+        self.runs.lock().expect("engine runs").push(line);
         self.progress.send_if_modified(|current| {
             let next = progress::step(current.clone(), line);
             let changed = *current != next;

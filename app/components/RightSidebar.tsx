@@ -1,4 +1,5 @@
 import { openStems } from '../services/openStems';
+import { PerformanceDetails } from './PerformanceDetails';
 import React, { useState, useEffect } from 'react';
 import { useKaraokeStatus } from '../services/studioQueries';
 import { TRACK_ARTIST } from '../services/studio';
@@ -743,6 +744,14 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                             </details>
                         );
                     })()}
+
+                    {song.truncated && (
+                        <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-[11px] leading-4 text-amber-700 dark:text-amber-300" data-testid="truncated-note">
+                            Cut at the length limit: the engine stopped this song at its budget, so it may end mid-phrase. Make it again with Max length on Auto to let the model finish it.
+                        </p>
+                    )}
+
+                    <PerformanceDetails song={song} />
 
                     {/* Karaoke: make the timings, then the file can be saved. */}
                     <SongVersions song={song} onChanged={(next) => onSongUpdate?.(next)} />

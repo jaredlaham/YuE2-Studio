@@ -59,7 +59,8 @@ def track_report(track, bpm: float) -> dict:
             "pitch_coarse": float(value(clip, "PitchCoarse", "0")),
             "pitch_fine": float(value(clip, "PitchFine", "0")),
         })
-    return {"track": name, "volume_linear": volume, "pan": pan, "devices": device_names, "audio_clips": clips}
+    active = value(mixer, "Speaker/Manual", "true") == "true" if mixer is not None else True
+    return {"track": name, "active": active, "volume_linear": volume, "pan": pan, "devices": device_names, "audio_clips": clips}
 
 
 def main():
@@ -85,14 +86,15 @@ def main():
         tracks = [track_report(t, bpm) for t in live.find("Tracks") if t.tag in ("AudioTrack", "MidiTrack")]
         main = live.find("MainTrack") if live.find("MainTrack") is not None else live.find("MasterTrack")
         main_report = track_report(main, bpm) if main is not None else None
-        mixes = [p for p in root.rglob("*") if p.is_file() and " - Mix." in p.name]
+        # "Master" since the generation-first export; "Mix" in projects made before it
+        mixes = [p for p in root.rglob("*") if p.is_file() and (" - Master." in p.name or " - Mix." in p.name)]
         report = {"set": sets[0].name, "bpm": bpm, "tracks": tracks, "main": main_report, "checks": []}
 
         def check(name, ok, detail):
             report["checks"].append({"check": name, "ok": bool(ok), "detail": detail})
 
         mix = mixes[0] if mixes else None
-        check("mix file in project", mix is not None, mix.name if mix else "no '<title> - Mix.*' file")
+        check("master file in project", mix is not None, mix.name if mix else "no '<title> - Master.*' file")
         if mix and args.master:
             same = sha(mix) == sha(args.master)
             detail = "byte-identical to the library master" if same else "bytes differ"
@@ -105,7 +107,13 @@ def main():
             check("mix equals master", same, detail)
         on_track = [t for t in tracks for c in t["audio_clips"] if c["file"] and mix and c["file"].endswith(mix.name)]
         check("master on a track", bool(on_track), "on track " + on_track[0]["track"] if on_track else
-              "the master is only in the folder, not in the set (Kinetic leaves it off when stems exist)")
+              "the master is only in the folder, not in the set (Kinetic left it off when stems existed, before the fix)")
+        if on_track:
+            check("master track is active", on_track[0]["active"], "plays" if on_track[0]["active"] else "switched off")
+        stems = [t for t in tracks if "(separated)" in t["track"]]
+        if stems:
+            playing = [t["track"] for t in stems if t["active"]]
+            check("stems are switched off", not playing, "all off" if not playing else "playing with the master: " + ", ".join(playing))
         for t in tracks:
             for c in t["audio_clips"]:
                 unchanged = (c["warp_mode"] == "Re-Pitch" or not c["warped"]) and (c["playback_rate"] in (None, 1.0) or abs(c["playback_rate"] - 1) < 1e-4) \

@@ -30,6 +30,7 @@ import { SongTextParts } from './SongTextParts';
 import { writerInstruction } from '../services/songWriting';
 import { songWritingStrings } from '../i18n/songWriting';
 import { KineticPromptPanel, type KineticForm } from './KineticPromptPanel';
+import { MODE_HINT, MODE_LABEL, MODE_SETTINGS, modeOf, type QualityMode } from '../services/qualityModes';
 
 /**
  * The YuE2 request form.
@@ -97,8 +98,14 @@ const finishedStyle = (text: string) => text.trim().replace(/,$/, '').trimEnd();
 const SEMANTIC_CODES_PER_SECOND = 25;
 /** 9000 semantic frames at 25 per second, the stage's own budget. */
 const MAX_DURATION_SECONDS = 600;
-/** A new prompt's ceiling: 2:10. Examples and prompt files keep their own. */
-const DEFAULT_DURATION_SECONDS = 130;
+/**
+ * A new prompt has no ceiling: the model ends the song when it is finished, up
+ * to 6:00, as the official pipeline does. A ceiling set by hand is kept;
+ * examples and prompt files keep their own.
+ */
+const DEFAULT_DURATION = '';
+/** Where a ceiling set by hand is kept. A new key: the old one held the former 2:10 default. */
+const DURATION_KEY = 'studio.createDurationCeiling';
 const SAMPLING_KEYS: (keyof YueSampling)[] = ['temperature', 'top_p', 'top_k', 'repetition_penalty', 'penalty_window', 'min_tokens', 'max_tokens'];
 /** A quoted chord symbol in ABC: "Am", "F/C", "G7". */
 const CHORD_SYMBOL = /"[^"\n]+"/;
@@ -217,7 +224,9 @@ const SliderRow: React.FC<{
   onChange: (value: string) => void;
   disabled?: boolean;
   format?: (value: number) => string;
-}> = ({ label, value, fallback, min, max, step, suffix, onChange, disabled, format }) => {
+  /** Shown instead of the fallback while the field is empty. */
+  emptyLabel?: string;
+}> = ({ label, value, fallback, min, max, step, suffix, onChange, disabled, format, emptyLabel }) => {
   const current = value.trim() === '' ? fallback : Number(value);
   const shown = Number.isFinite(current) ? current : fallback;
   const decimals = step < 1 ? String(step).split('.')[1]?.length ?? 1 : 0;
@@ -226,8 +235,8 @@ const SliderRow: React.FC<{
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</span>
         <span className="text-[11px] tabular-nums text-zinc-600 dark:text-zinc-300">
-          {format ? format(shown) : `${shown.toFixed(decimals)}${suffix ?? ''}`}
-          {value.trim() === '' && <span className="ml-1 text-zinc-400" title="engine default">·</span>}
+          {value.trim() === '' && emptyLabel ? emptyLabel : format ? format(shown) : `${shown.toFixed(decimals)}${suffix ?? ''}`}
+          {value.trim() === '' && !emptyLabel && <span className="ml-1 text-zinc-400" title="engine default">·</span>}
         </span>
       </div>
       <input
@@ -326,17 +335,20 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [showNotation, setShowNotation] = useState(true);
 
   // Strings, so an empty field can mean "engine default".
-  // The ceiling last set by hand, kept between sessions like the playlist:
-  // a song made longer once is not cut at 2:10 after the next start.
+  // A ceiling set by hand, kept between sessions like the playlist; empty is
+  // Auto, the model's own length.
   const [duration, setDuration] = useState(() => {
     try {
-      const kept = Number(window.localStorage.getItem('studio.createDuration'));
-      return kept >= 10 && kept <= MAX_DURATION_SECONDS ? String(kept) : String(DEFAULT_DURATION_SECONDS);
-    } catch { return String(DEFAULT_DURATION_SECONDS); }
+      const kept = Number(window.localStorage.getItem(DURATION_KEY));
+      return kept >= 10 && kept <= MAX_DURATION_SECONDS ? String(kept) : DEFAULT_DURATION;
+    } catch { return DEFAULT_DURATION; }
   });
   const chooseDuration = (value: string) => {
     setDuration(value);
-    try { window.localStorage.setItem('studio.createDuration', value); } catch { /* kept until a reload */ }
+    try {
+      if (value.trim() === '') window.localStorage.removeItem(DURATION_KEY);
+      else window.localStorage.setItem(DURATION_KEY, value);
+    } catch { /* kept until a reload */ }
   };
   const [lmBatch, setLmBatch] = useState('');
   const [synthBatch, setSynthBatch] = useState('');
@@ -355,7 +367,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const harmonyField = (key: keyof HarmonyText) => (value: string) => setHarmony(current => ({ ...current, [key]: key === 'follow_lyrics' ? value === 'true' : value }));
   const [transpose, setTranspose] = useState('0');
   const [vocalsOnly, setVocalsOnly] = useState(false);
-  const [lyricTiming, setLyricTiming] = useState(true);
+  // off: the reference pipeline shows the model every word from the start
+  const [lyricTiming, setLyricTiming] = useState(false);
   // the decoder companion: auto leaves it to the service (on only under a LoRA trained in the studio)
   const [realaudio, setRealaudio] = useState<'auto' | 'on' | 'off'>('auto');
   // The engine default of 128 kbps throws away what the VAE produced.
@@ -519,7 +532,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     setContinueScore(request.abc_continue === true);
     setTranspose(asText(request.transpose) || '0');
     setVocalsOnly(request.vocals_only === true);
-    setLyricTiming(request.lyric_timing !== false);
+    setLyricTiming(request.lyric_timing === true);
     setRealaudio(request.companion_scale === undefined ? 'auto' : request.companion_scale === 0 ? 'off' : 'on');
     if (request.mp3_bitrate !== undefined) setMp3Bitrate(asText(request.mp3_bitrate));
     if (request.output_format === 'mp3' || request.output_format === 'flac' || request.output_format === 'wav32') setFormat(request.output_format);
@@ -535,7 +548,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     setLyrics(form.lyrics);
     setAbc(form.abc);
     setCot(form.cot);
-    if (form.durationSeconds !== null) chooseDuration(String(Math.min(Math.max(form.durationSeconds, 1), MAX_DURATION_SECONDS)));
+    // a preset without a length leaves the song's length to the model
+    chooseDuration(form.durationSeconds !== null ? String(Math.min(Math.max(form.durationSeconds, 1), MAX_DURATION_SECONDS)) : DEFAULT_DURATION);
     setPlans([]); setSelectedPlan(0); setSemanticTokens(''); setContinueScore(false);
     if (form.abc) setShowNotation(true);
     setError(null);
@@ -622,11 +636,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   };
 
   const resetParameters = () => {
-    chooseDuration(String(DEFAULT_DURATION_SECONDS)); setLmBatch(''); setSynthBatch(''); setSteps(''); setSolver(''); setCfgScale('');
+    chooseDuration(DEFAULT_DURATION); setLmBatch(''); setSynthBatch(''); setSteps(''); setSolver(''); setCfgScale('');
     setRandomizeSeed(true); setLmSeed(''); setSeed(''); setSemanticTokens('');
     setAbcSampling(emptySampling()); setSemanticSampling(emptySampling()); setHarmony(emptyHarmony());
     setMp3Bitrate('320'); setFormat('flac');
-    setTranspose('0'); setVocalsOnly(false); setLyricTiming(true); setRealaudio('auto');
+    setTranspose('0'); setVocalsOnly(false); setLyricTiming(false); setRealaudio('auto');
   };
 
   const loadExample = (id?: string) => {
@@ -645,7 +659,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     };
     if (abc.trim() && effectiveCot !== 'off') request.abc = abc.trim();
     if (abc.trim() && effectiveCot !== 'off' && !semanticTokens.trim() && Number(transpose) !== 0) request.transpose = Number(transpose);
-    if (abc.trim() && effectiveCot !== 'off' && !lyricTiming) request.lyric_timing = false;
+    if (abc.trim() && effectiveCot !== 'off') request.lyric_timing = lyricTiming;
     if (realaudio !== 'auto') request.companion_scale = realaudio === 'on' ? 1 : 0;
     if (vocalsOnly) request.vocals_only = true;
     if (cot) request.cot = cot;
@@ -1050,6 +1064,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const variations = numberOrUndefined(synthBatch) ?? 1;
   const totalTracks = songs * variations;
   const durationFallback = Number(defaults.duration ?? MAX_DURATION_SECONDS);
+  const qualityMode = modeOf(steps, solver);
+  const chooseMode = (mode: Exclude<QualityMode, 'custom'>) => {
+    setSteps(MODE_SETTINGS[mode].steps);
+    setSolver(MODE_SETTINGS[mode].solver);
+  };
   const formatDuration = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
   // The engine caps the audio-code stage at duration x 25 codes: what a
   // larger max tokens would ask for is never drawn.
@@ -1663,6 +1682,26 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             }
           >
             <div className="space-y-3">
+              <div data-testid="quality-mode">
+                <div className="grid grid-cols-2 gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-white/[0.04]" role="radiogroup" aria-label="Render mode">
+                  {(['studio', 'draft'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={qualityMode === mode}
+                      onClick={() => chooseMode(mode)}
+                      className={`rounded-md px-2 py-1.5 text-xs font-semibold transition-colors ${qualityMode === mode ? 'bg-white text-zinc-900 shadow-sm dark:bg-white/15 dark:text-white' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'}`}
+                    >
+                      {MODE_LABEL[mode]}{mode === 'studio' && <span className="ml-1 font-normal text-zinc-400">default</span>}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[11px] leading-4 text-zinc-500">
+                  {qualityMode === 'custom' && <span className="font-semibold text-zinc-600 dark:text-zinc-300">Custom: </span>}
+                  {MODE_HINT[qualityMode]}
+                </p>
+              </div>
               <SliderRow
                 label={t('maxDuration')}
                 value={duration}
@@ -1672,8 +1711,13 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                 step={5}
                 onChange={chooseDuration}
                 format={formatDuration}
+                emptyLabel="Auto"
               />
-              <p className="text-[11px] leading-4 text-zinc-500">{tt('maxDurationHintYue')}</p>
+              <p className="text-[11px] leading-4 text-zinc-500">
+                {duration.trim() === ''
+                  ? 'Auto: the model ends the song when it is finished, up to 6:00. Longer songs take longer to render.'
+                  : <>{tt('maxDurationHintYue')} <button type="button" onClick={() => chooseDuration(DEFAULT_DURATION)} className="font-semibold text-pink-600 hover:underline dark:text-pink-400">Back to Auto</button></>}
+              </p>
               <SliderRow
                 label={tt('flowSteps')}
                 value={steps}
@@ -1903,6 +1947,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         >
           {isGenerating ? <Square size={18} /> : <Sparkles size={18} />}
           {t('create')}
+          {qualityMode !== 'studio' && <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs" data-testid="create-mode">{MODE_LABEL[qualityMode]}</span>}
           {activeJobCount > 0 && <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{activeJobCount}</span>}
         </button>
       </footer>

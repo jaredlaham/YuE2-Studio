@@ -172,6 +172,8 @@ effect unknown.* `docs/kinetic-studio/README.md:69-79` suggests AB2 and 16 steps
 steps was measured close to midpoint by the engine's author (mel correlation 0.9996, at 16 steps);
 16 vs 32 steps has not been compared on this build. If any of your later songs used 16 steps, that
 alone could soften transients and detail.
+*Addressed in `SPEED.md`:* the guide no longer suggests 16 steps; AB2 at 32 steps is offered as a
+labelled Fast Draft, and `scripts/quality/bench_speed.py` measures both against the reference.
 
 ## 6. Hypotheses to test (Phase 2)
 

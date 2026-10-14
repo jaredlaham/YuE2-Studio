@@ -52,12 +52,64 @@ export interface Song {
   bpm?: number;
   keyScale?: string;
   timeSignature?: string;
+  /** How long the song took to make, stage by stage, as recorded when it was imported. */
+  performance?: SongPerformance;
+  /** The engine stopped the song at its length budget instead of the model ending it. */
+  truncated?: boolean;
   /** The track carries its semantic stream, so POST /v1/music/replay can re-render it. */
   nativeReplayAvailable?: boolean;
   /** Processed versions kept beside the original; the active one plays. */
   audioVersions?: SongVersion[];
   /** `original`, a version id, or absent for a track never processed. */
   activeVersion?: string;
+}
+
+/** The engine's own stage timings for one job (yue2.cpp's log), in milliseconds. */
+export interface EngineRun {
+  job_id: string;
+  backend?: string;
+  load_ms: number;
+  score_ms?: number;
+  score_tokens?: number;
+  semantic_ms?: number;
+  semantic_frames?: number;
+  truncated: boolean;
+  acoustic_wall_ms?: number;
+  acoustic_ms?: number;
+  acoustic_steps?: number;
+  solver?: string;
+  evaluations?: number;
+  decode_ms?: number;
+  engine_total_ms?: number;
+  audio_seconds?: number;
+  finished: boolean;
+}
+
+export interface SongPerformance {
+  version: number;
+  submitted_at: number;
+  started_at?: number | null;
+  engine_done_at: number;
+  imported_at: number;
+  time_to_playable_ms: number;
+  queued_ms?: number | null;
+  import_ms: number;
+  engine?: EngineRun | null;
+  resources?: {
+    samples: number;
+    system_used_peak_mb: number;
+    system_total_mb: number;
+    engine_rss_peak_mb?: number;
+    swap_start_mb: number;
+    swap_peak_mb: number;
+    engine_cpu_percent_avg?: number;
+    remote_engine: boolean;
+  } | null;
+  model?: string | null;
+  solver: string;
+  steps: number;
+  audio_seconds?: number | null;
+  realtime_factor?: number | null;
 }
 
 export interface SongVersion {

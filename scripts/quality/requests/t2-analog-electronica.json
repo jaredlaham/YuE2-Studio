@@ -1,0 +1,8 @@
+{
+  "id": "t2-analog-electronica",
+  "note": "Kinetic Studio's built-in Analog Electronica preset exactly as compilePrompt() writes it for 'Use in form' (app/services/kineticPrompt.ts). Section tags only, no score: the request the studio sends when no instrumental score is composed.",
+  "style": "Instrumental, analog electronica, sequenced analog bassline, evolving arpeggiators, detuned polysynth chords, crisp drum machine, expressive modulated lead synth, driving, bright, euphoric, steady build with filter sweeps, warm analog saturation, tempo-synced delay, punchy compression, A minor, no vocals, no singing, no choir, no spoken words, 118 BPM",
+  "lyrics": "[Intro]\n\n[Verse]\n\n[Pre-Chorus]\n\n[Chorus 1]\n\n[Bridge]\n\n[Chorus 2]\n\n[Outro]",
+  "cot": "full",
+  "seed": 831001
+}

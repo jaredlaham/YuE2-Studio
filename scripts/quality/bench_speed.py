@@ -185,15 +185,36 @@ def stages(song):
     }
 
 
+EXPORT_LIMIT_S = 40 * 60
+
+
 def export(song_id, stems):
+    """One export, saying each stage as it starts and every minute while one runs; gives up
+    after EXPORT_LIMIT_S so a stuck export cannot hold the rest of the benchmark."""
     clock = time.monotonic()
     job = call("POST", "/v1/kinetic/ableton/jobs", {"song_id": song_id, "stems": stems})
+    seen, heartbeat, error = {}, clock, None
     while not job["done"]:
         time.sleep(1)
         job = call("GET", f"/v1/kinetic/ableton/jobs/{job['id']}")
+        now = time.monotonic()
+        for stage in job["stages"]:
+            if seen.get(stage["id"]) != stage["state"]:
+                seen[stage["id"]] = stage["state"]
+                if stage["state"] != "pending":
+                    say(f"  {stage['label']}: {stage['state']}. {stage['detail']}")
+        if now - heartbeat >= 60:
+            heartbeat = now
+            busy = [stage for stage in job["stages"] if stage["state"] in ("running", "waiting")]
+            if busy:
+                say(f"  still {busy[0]['state']}: {busy[0]['detail']}")
+        if now - clock > EXPORT_LIMIT_S:
+            error = f"gave up after {EXPORT_LIMIT_S // 60} minutes; the export may still finish in the app"
+            say(f"  {error}")
+            break
     return {
         "wall_s": round(time.monotonic() - clock, 1),
-        "error": job.get("error"),
+        "error": error or job.get("error"),
         "stages": {stage["id"]: {"state": stage["state"], "s": round(stage.get("ms", 0) / 1000, 2), "detail": stage["detail"]} for stage in job["stages"]},
         "tracks": (job.get("project") or {}).get("tracks"),
     }
@@ -218,7 +239,8 @@ def markdown(report):
     if report.get("export"):
         lines += ["## Ableton export (60-second song)", ""]
         for name, run in report["export"].items():
-            lines.append(f"- {name}: {run['wall_s']} s; " + "; ".join(f"{stage} {info['state']} {info['s']} s" for stage, info in run["stages"].items()))
+            lines.append(f"- {name}: {run['wall_s']} s; " + "; ".join(f"{stage} {info['state']} {info['s']} s" for stage, info in run["stages"].items())
+                         + (f"; error: {run['error']}" if run.get("error") else ""))
         lines.append("")
     lines += ["Null test: under -90 dB is the same audio; -40 to -60 dB is the same music with numerical drift; above -20 dB is different audio.",
               "LSD: log-spectral distance in dB, 0 is identical. Listen before deciding: the numbers locate a difference, they do not judge it."]
@@ -239,6 +261,10 @@ def main():
         call("GET", "/health")
     except Exception as error:
         sys.exit(f"Kinetic Studio is not answering on {STUDIO}: {error}")
+    active = call("GET", "/v1/music/jobs")
+    if active:
+        sys.exit(f"{len(active)} song(s) are still generating in Kinetic Studio (an earlier run's, perhaps): "
+                 "let them finish or stop them in the queue, then start again, so they do not slow these timings")
     machine = platform.platform()
     if sys.platform == "darwin":
         chip = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True, text=True).stdout.strip()
@@ -266,7 +292,10 @@ def main():
         (args.output / "report.json").write_text(json.dumps(report, indent=1))
         if key == "60" and not args.no_export:
             say("Ableton export, cold then warm")
-            report["export"] = {"cold": export(song["id"], True), "warm (reused)": export(song["id"], True)}
+            cold = export(song["id"], True)
+            report["export"] = {"cold": cold}
+            if not cold["error"]:
+                report["export"]["warm (reused)"] = export(song["id"], True)
             (args.output / "report.json").write_text(json.dumps(report, indent=1))
 
     (args.output / "report.md").write_text(markdown(report))

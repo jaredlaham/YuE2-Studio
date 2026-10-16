@@ -603,7 +603,17 @@ async fn make_stems(state: &AppState, id: &str, song: &crate::library::Song, mix
             }
         }
     };
-    let (outcome, library) = joined.map_err(|error| error.to_string())?;
+    let (outcome, library) = match joined {
+        Ok(result) => result,
+        Err(error) => {
+            // a separation that died must not leave every later one waiting on it
+            if let Some(run) = state.separation_run.write().await.as_mut() {
+                run.done = true;
+                run.error = Some(error.to_string());
+            }
+            return Err(error.to_string());
+        }
+    };
     if let Some(run) = state.separation_run.write().await.as_mut() {
         run.done = true;
         run.progress = 1.0;
